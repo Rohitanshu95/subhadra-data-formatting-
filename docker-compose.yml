@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  # FastAPI Backend API
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    container_name: apbs_backend
+    restart: unless-stopped
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - DATABASE_URL=sqlite:///./storage/apbs_database.db
+      - WORKER_COUNT=4
+    volumes:
+      - ./storage:/app/storage
+    depends_on:
+      - redis
+    ports:
+      - "8080:8080"
+
+  # Celery Worker Pool
+  worker:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    container_name: apbs_worker
+    restart: unless-stopped
+    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=4
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - DATABASE_URL=sqlite:///./storage/apbs_database.db
+    volumes:
+      - ./storage:/app/storage
+    depends_on:
+      - redis
+
+  # Redis Message Broker
+  redis:
+    image: redis:7-alpine
+    container_name: apbs_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+  # Frontend & Nginx Proxy
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+    container_name: apbs_frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend

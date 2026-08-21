@@ -1,0 +1,60 @@
+# ==========================================
+# Root .gitignore — APBS Data Separator
+# ==========================================
+
+# ── Environment & Secrets ──
+.env
+.env.*
+!.env.example
+*.local
+
+# ── Python / Backend ──
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+.pytest_cache/
+.coverage
+.coverage.*
+*.db
+*.sqlite
+*.sqlite3
+
+# ── Node.js / Frontend ──
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+dist-ssr/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ── Storage Runtime Data ──
+# Keep directory scaffold but ignore large batch files
+storage/input/*
+storage/output/*
+storage/errors/*
+storage/logs/*
+!storage/input/.gitkeep
+!storage/output/.gitkeep
+!storage/errors/.gitkeep
+!storage/logs/.gitkeep
+
+# ── Celery / Redis ──
+celerybeat-schedule
+celerybeat.pid
+
+# ── IDEs and OS ──
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
