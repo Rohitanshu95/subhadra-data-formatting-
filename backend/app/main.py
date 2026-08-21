@@ -39,3 +39,10 @@ app.include_router(logs_router)
 async def health_check():
     """Service health check endpoint."""
     return HealthCheckSchema()
+
+
+@app.on_event("startup")
+def on_startup():
+    """Initialize database schemas, tables, and connection on startup."""
+    from app.core.database import init_db
+    init_db()
