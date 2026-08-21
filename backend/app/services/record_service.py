@@ -222,17 +222,15 @@ def get_paginated_parsed_records(
     offset = (page - 1) * page_size
     paged_slice = filtered[offset : offset + page_size]
 
-    # Apply PII Masking
-    masked_items = []
+    # Return unmasked records in exact canonical order
+    result_items = []
     for r in paged_slice:
-        masked = mask_record_dict(r)
-        # Ensure all 17 canonical columns + status + batch/file + ID are present
-        item = {k: masked.get(k, "") for k in CANONICAL_FIELD_NAMES}
+        item = {k: r.get(k, "") for k in CANONICAL_FIELD_NAMES}
         item["id"] = r.get("id") or r.get("user_credit_reference", "")
-        item["status"] = masked.get("status", "Pending Verification")
-        item["_source_file"] = masked.get("_source_file", "")
-        item["batch_id"] = masked.get("batch_id", "")
-        masked_items.append(item)
+        item["status"] = r.get("status", "Pending Verification")
+        item["_source_file"] = r.get("_source_file", "")
+        item["batch_id"] = r.get("batch_id", "")
+        result_items.append(item)
 
     return {
         "batch_id": batch_id,
@@ -242,7 +240,7 @@ def get_paginated_parsed_records(
         "page_size": page_size,
         "total_pages": total_pages,
         "columns": CANONICAL_FIELD_NAMES + ["status"],
-        "records": masked_items,
+        "records": result_items,
     }
 
 

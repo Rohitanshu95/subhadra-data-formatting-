@@ -24,6 +24,8 @@ import {
   deleteBatch
 } from '../services/api';
 import StatusBadge from '../components/StatusBadge';
+import Modal from '../components/Modal';
+import Toast from '../components/Toast';
 
 export default function BatchResults() {
   const { id: batchId } = useParams();
@@ -60,34 +62,68 @@ export default function BatchResults() {
     fetchAllData();
   }, [batchId]);
 
+  const [modalConfig, setModalConfig] = useState({
+    isOpen: false,
+    title: '',
+    description: '',
+    confirmText: 'Confirm',
+    variant: 'danger',
+    details: null,
+    onConfirm: null,
+  });
+  const [toast, setToast] = useState(null);
+
+  const showToast = (message, type = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 4000);
+  };
+
+  const closeModal = () => {
+    setModalConfig(prev => ({ ...prev, isOpen: false }));
+  };
+
   const handleVerify = async () => {
     try {
       setActionLoading(true);
       const updated = await verifyBatch(batchId);
       setBatch(updated);
+      showToast(`Batch ${batchId} verified successfully.`);
     } catch (err) {
-      alert(err.response?.data?.detail || 'Failed to verify batch');
+      showToast(err.response?.data?.detail || 'Failed to verify batch', 'error');
     } finally {
       setActionLoading(false);
     }
   };
 
-  const handleImportToSql = async () => {
-    if (!window.confirm('Are you sure you want to approve and import all clean records into the SQL database?')) {
-      return;
-    }
-
-    try {
-      setActionLoading(true);
-      const res = await importBatchToSql(batchId);
-      setImportResult(res);
-      const updated = await getBatch(batchId);
-      setBatch(updated);
-    } catch (err) {
-      alert(err.response?.data?.detail || 'Failed to import batch to SQL');
-    } finally {
-      setActionLoading(false);
-    }
+  const promptImportToSql = () => {
+    setModalConfig({
+      isOpen: true,
+      title: 'Approve & Import to SQL Database',
+      description: 'Are you sure you want to commit all valid records into the production SQL database? This will also automatically clean up staged files.',
+      confirmText: 'Approve & Commit to Database',
+      variant: 'success',
+      details: (
+        <div>
+          <div><strong>Batch:</strong> <span style={{ fontFamily: 'var(--font-mono)' }}>{batchId}</span></div>
+          <div><strong>Valid Records to Commit:</strong> {batch?.valid_records?.toLocaleString() || 0}</div>
+        </div>
+      ),
+      onConfirm: async () => {
+        try {
+          setActionLoading(true);
+          const res = await importBatchToSql(batchId);
+          setImportResult(res);
+          const updated = await getBatch(batchId);
+          setBatch(updated);
+          showToast(`Successfully committed ${res.total_imported} records to SQL database.`);
+          closeModal();
+        } catch (err) {
+          showToast(err.response?.data?.detail || 'Failed to import batch to SQL', 'error');
+        } finally {
+          setActionLoading(false);
+        }
+      }
+    });
   };
 
   const isVerified = batch?.status === 'VERIFIED';
@@ -95,18 +131,30 @@ export default function BatchResults() {
 
   const navigate = useNavigate();
 
-  const handleDeleteBatch = async () => {
-    if (!window.confirm(`⚠️ Are you sure you want to permanently delete Batch "${batchId}"?\n\nThis will remove all associated files, audit logs, and SQL database transactions.`)) {
-      return;
-    }
-    try {
-      setActionLoading(true);
-      await deleteBatch(batchId);
-      navigate('/');
-    } catch (err) {
-      alert(`Failed to delete batch: ${err.response?.data?.detail || err.message}`);
-      setActionLoading(false);
-    }
+  const promptDeleteBatch = () => {
+    setModalConfig({
+      isOpen: true,
+      title: 'Delete Batch Confirmation',
+      description: `Are you sure you want to permanently delete Batch "${batchId}"? This will remove all associated files, audit logs, and SQL database transactions.`,
+      confirmText: 'Delete Entire Batch',
+      variant: 'danger',
+      details: (
+        <div style={{ color: '#b91c1c' }}>
+          ⚠️ All transactions from this batch in the database will be erased.
+        </div>
+      ),
+      onConfirm: async () => {
+        try {
+          setActionLoading(true);
+          await deleteBatch(batchId);
+          closeModal();
+          navigate('/');
+        } catch (err) {
+          showToast(`Failed to delete batch: ${err.response?.data?.detail || err.message}`, 'error');
+          setActionLoading(false);
+        }
+      }
+    });
   };
 
   return (
@@ -133,7 +181,7 @@ export default function BatchResults() {
             Download Results ZIP Package
           </a>
           <button
-            onClick={handleDeleteBatch}
+            onClick={promptDeleteBatch}
             disabled={actionLoading}
             className="btn btn-danger"
             style={{ padding: '8px 14px' }}
@@ -181,7 +229,7 @@ export default function BatchResults() {
 
             {!isImported && (
               <button 
-                onClick={handleImportToSql} 
+                onClick={promptImportToSql} 
                 className="btn btn-success"
                 disabled={actionLoading}
               >
@@ -406,6 +454,22 @@ export default function BatchResults() {
           </pre>
         </div>
       )}
+
+      {/* Custom Application Confirmation Modal */}
+      <Modal
+        isOpen={modalConfig.isOpen}
+        onClose={closeModal}
+        onConfirm={modalConfig.onConfirm}
+        title={modalConfig.title}
+        description={modalConfig.description}
+        confirmText={modalConfig.confirmText}
+        variant={modalConfig.variant}
+        details={modalConfig.details}
+        loading={actionLoading}
+      />
+
+      {/* Custom Application Toast Notification */}
+      <Toast toast={toast} onClose={() => setToast(null)} />
     </div>
   );
 }

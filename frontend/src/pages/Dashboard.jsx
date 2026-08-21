@@ -22,6 +22,8 @@ import {
 import { listBatches, getOverviewStats, getParsedRecords, deleteBatch, deleteRecord } from '../services/api';
 import MetricCard from '../components/MetricCard';
 import StatusBadge from '../components/StatusBadge';
+import Modal from '../components/Modal';
+import Toast from '../components/Toast';
 
 export default function Dashboard() {
   const [activeView, setActiveView] = useState('records'); // 'records' (default primary) or 'batches'
@@ -116,40 +118,95 @@ export default function Dashboard() {
     setPage(1);
   };
 
-  // Batch deletion handler
-  const handleDeleteBatch = async (batchId) => {
-    if (!window.confirm(`⚠️ Are you sure you want to permanently delete Batch "${batchId}"?\n\nThis will remove all associated files, audit logs, and SQL database transactions.`)) {
-      return;
-    }
-    try {
-      setDeletingId(batchId);
-      await deleteBatch(batchId);
-      await Promise.all([fetchOverviewData(), fetchRecordsData()]);
-    } catch (err) {
-      alert(`Failed to delete batch: ${err.response?.data?.detail || err.message}`);
-    } finally {
-      setDeletingId(null);
-    }
+  const [modalConfig, setModalConfig] = useState({
+    isOpen: false,
+    title: '',
+    description: '',
+    confirmText: 'Delete',
+    variant: 'danger',
+    details: null,
+    onConfirm: null,
+  });
+  const [toast, setToast] = useState(null);
+
+  const showToast = (message, type = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 4000);
   };
 
-  // Record deletion handler
-  const handleDeleteRecord = async (record) => {
-    const beneficiary = record.beneficiary_name?.trim() || record.user_credit_reference || 'this record';
-    if (!window.confirm(`Delete record for "${beneficiary}" (Ref: ${record.user_credit_reference})?\n\nThis will remove it from the database & staging files.`)) {
-      return;
-    }
-    try {
-      setDeletingId(record.id || record.user_credit_reference);
-      await deleteRecord(record.id || record.user_credit_reference, {
-        ref: record.user_credit_reference,
-        batch_id: record.batch_id,
-      });
-      await Promise.all([fetchOverviewData(), fetchRecordsData()]);
-    } catch (err) {
-      alert(`Failed to delete record: ${err.response?.data?.detail || err.message}`);
-    } finally {
-      setDeletingId(null);
-    }
+  const closeModal = () => {
+    setModalConfig(prev => ({ ...prev, isOpen: false }));
+  };
+
+  // Batch deletion handler with custom Modal
+  const promptDeleteBatch = (batchId) => {
+    setModalConfig({
+      isOpen: true,
+      title: 'Delete Batch Confirmation',
+      description: 'Are you sure you want to permanently delete this batch? All transactions, audit logs, and physical files will be permanently erased.',
+      confirmText: 'Delete Entire Batch',
+      variant: 'danger',
+      details: (
+        <div>
+          <div style={{ marginBottom: '4px' }}><strong>Batch Identifier:</strong> <span style={{ fontFamily: 'var(--font-mono)' }}>{batchId}</span></div>
+          <div style={{ color: '#b91c1c', fontSize: '0.8rem' }}>⚠️ This action will remove all corresponding SQL database transactions and storage artifacts.</div>
+        </div>
+      ),
+      onConfirm: async () => {
+        try {
+          setDeletingId(batchId);
+          await deleteBatch(batchId);
+          showToast(`Batch "${batchId}" and associated records deleted.`);
+          closeModal();
+          await Promise.all([fetchOverviewData(), fetchRecordsData()]);
+        } catch (err) {
+          showToast(`Failed to delete batch: ${err.response?.data?.detail || err.message}`, 'error');
+        } finally {
+          setDeletingId(null);
+        }
+      }
+    });
+  };
+
+  // Record deletion handler with custom Modal
+  const promptDeleteRecord = (record) => {
+    const beneficiary = record.beneficiary_name?.trim() || 'Beneficiary Record';
+    const ref = record.user_credit_reference || 'N/A';
+    const aadhaar = record.beneficiary_aadhaar_number || 'N/A';
+    const amount = record.amount || '0';
+
+    setModalConfig({
+      isOpen: true,
+      title: 'Delete APBS Transaction',
+      description: 'Are you sure you want to permanently remove this transaction from the database and staging files?',
+      confirmText: 'Delete Record',
+      variant: 'danger',
+      details: (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+          <div><strong>Beneficiary:</strong> {beneficiary}</div>
+          <div><strong>Credit Ref:</strong> <span style={{ fontFamily: 'var(--font-mono)' }}>{ref}</span></div>
+          <div><strong>Aadhaar:</strong> <span style={{ fontFamily: 'var(--font-mono)' }}>{aadhaar}</span></div>
+          <div><strong>Amount (Paise):</strong> {amount}</div>
+        </div>
+      ),
+      onConfirm: async () => {
+        try {
+          const recId = record.id || record.user_credit_reference;
+          setDeletingId(recId);
+          await deleteRecord(recId, {
+            ref: record.user_credit_reference,
+            batch_id: record.batch_id,
+          });
+          showToast(`Transaction for "${beneficiary}" deleted from database.`);
+          closeModal();
+          await Promise.all([fetchOverviewData(), fetchRecordsData()]);
+        } catch (err) {
+          showToast(`Failed to delete record: ${err.response?.data?.detail || err.message}`, 'error');
+        } finally {
+          setDeletingId(null);
+        }
+      }
+    });
   };
 
   const hasActiveFilters = selectedBatch !== 'ALL' || successFlag !== '' || reasonCode !== '' || statusFilter !== 'ALL' || searchQuery !== '';
@@ -329,9 +386,9 @@ export default function Dashboard() {
         </div>
 
         {activeView === 'records' && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', color: '#475569' }}>
-            <Shield size={16} color="#15803d" />
-            <span>PII Masking Active (Aadhaar/Accounts Masked)</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', color: '#166534', background: '#f0fdf4', border: '1px solid #bbf7d0', padding: '4px 10px', borderRadius: '4px' }}>
+            <CheckCircle2 size={15} color="#16a34a" />
+            <span style={{ fontWeight: 600 }}>Full Unmasked Data View Active</span>
           </div>
         )}
       </div>
@@ -451,7 +508,7 @@ export default function Dashboard() {
                   Parsed Clean Records
                 </h2>
                 <span style={{ fontSize: '0.8rem', color: '#64748b', fontWeight: 600 }}>
-                  — 17-field canonical schema with Aadhaar & account numbers masked
+                  — 17-field canonical schema with complete Aadhaar & account numbers
                 </span>
               </div>
 
@@ -551,7 +608,7 @@ export default function Dashboard() {
                         </td>
                         <td style={{ textAlign: 'center' }}>
                           <button
-                            onClick={() => handleDeleteRecord(r)}
+                            onClick={() => promptDeleteRecord(r)}
                             disabled={deletingId === (r.id || r.user_credit_reference)}
                             className="btn btn-danger"
                             style={{ padding: '3px 8px', fontSize: '0.75rem' }}
@@ -698,7 +755,7 @@ export default function Dashboard() {
                             Results <ArrowRight size={11} />
                           </Link>
                           <button
-                            onClick={() => handleDeleteBatch(batch.batch_id)}
+                            onClick={() => promptDeleteBatch(batch.batch_id)}
                             disabled={deletingId === batch.batch_id}
                             className="btn btn-danger"
                             style={{ padding: '4px 8px', fontSize: '0.75rem' }}
@@ -716,6 +773,22 @@ export default function Dashboard() {
           )}
         </div>
       )}
+
+      {/* Custom Application Confirmation Modal */}
+      <Modal
+        isOpen={modalConfig.isOpen}
+        onClose={closeModal}
+        onConfirm={modalConfig.onConfirm}
+        title={modalConfig.title}
+        description={modalConfig.description}
+        confirmText={modalConfig.confirmText}
+        variant={modalConfig.variant}
+        details={modalConfig.details}
+        loading={Boolean(deletingId)}
+      />
+
+      {/* Custom Application Toast Notification */}
+      <Toast toast={toast} onClose={() => setToast(null)} />
     </div>
   );
 }

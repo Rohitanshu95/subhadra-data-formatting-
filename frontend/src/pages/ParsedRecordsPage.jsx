@@ -18,6 +18,8 @@ import {
 } from 'lucide-react';
 import { getParsedRecords, getBatch, deleteRecord } from '../services/api';
 import StatusBadge from '../components/StatusBadge';
+import Modal from '../components/Modal';
+import Toast from '../components/Toast';
 
 export default function ParsedRecordsPage() {
   const { id: batchId } = useParams();
@@ -87,25 +89,64 @@ export default function ParsedRecordsPage() {
     fetchRecords();
   }, [fetchRecords]);
 
-  const [deletingId, setDeletingId] = useState(null);
+  const [modalConfig, setModalConfig] = useState({
+    isOpen: false,
+    title: '',
+    description: '',
+    confirmText: 'Delete',
+    variant: 'danger',
+    details: null,
+    onConfirm: null,
+  });
+  const [toast, setToast] = useState(null);
 
-  const handleDeleteRecord = async (record) => {
-    const beneficiary = record.beneficiary_name?.trim() || record.user_credit_reference || 'this record';
-    if (!window.confirm(`Delete record for "${beneficiary}" (Ref: ${record.user_credit_reference})?\n\nThis will remove it from the database & staging files.`)) {
-      return;
-    }
-    try {
-      setDeletingId(record.id || record.user_credit_reference);
-      await deleteRecord(record.id || record.user_credit_reference, {
-        ref: record.user_credit_reference,
-        batch_id: batchId,
-      });
-      await fetchRecords();
-    } catch (err) {
-      alert(`Failed to delete record: ${err.response?.data?.detail || err.message}`);
-    } finally {
-      setDeletingId(null);
-    }
+  const showToast = (message, type = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 4000);
+  };
+
+  const closeModal = () => {
+    setModalConfig(prev => ({ ...prev, isOpen: false }));
+  };
+
+  const promptDeleteRecord = (record) => {
+    const beneficiary = record.beneficiary_name?.trim() || 'Beneficiary Record';
+    const ref = record.user_credit_reference || 'N/A';
+    const aadhaar = record.beneficiary_aadhaar_number || 'N/A';
+    const amount = record.amount || '0';
+
+    setModalConfig({
+      isOpen: true,
+      title: 'Delete APBS Transaction',
+      description: 'Are you sure you want to permanently remove this transaction from the database and staging files?',
+      confirmText: 'Delete Record',
+      variant: 'danger',
+      details: (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+          <div><strong>Beneficiary:</strong> {beneficiary}</div>
+          <div><strong>Credit Ref:</strong> <span style={{ fontFamily: 'var(--font-mono)' }}>{ref}</span></div>
+          <div><strong>Aadhaar:</strong> <span style={{ fontFamily: 'var(--font-mono)' }}>{aadhaar}</span></div>
+          <div><strong>Amount (Paise):</strong> {amount}</div>
+        </div>
+      ),
+      onConfirm: async () => {
+        try {
+          const recId = record.id || record.user_credit_reference;
+          setDeletingId(recId);
+          await deleteRecord(recId, {
+            ref: record.user_credit_reference,
+            batch_id: batchId,
+          });
+          showToast(`Transaction for "${beneficiary}" deleted from database.`);
+          closeModal();
+          await fetchRecords();
+        } catch (err) {
+          showToast(`Failed to delete record: ${err.response?.data?.detail || err.message}`, 'error');
+        } finally {
+          setDeletingId(null);
+        }
+      }
+    });
   };
 
   const handleClearFilters = () => {
@@ -154,7 +195,7 @@ export default function ParsedRecordsPage() {
             {batch && <StatusBadge status={batch.status} />}
           </div>
           <p style={{ color: '#64748b', fontSize: '0.875rem' }}>
-            Parsed APBS Records Inspector — Canonical 17-Field Layout with PII Masking
+            Parsed APBS Records Inspector — Canonical 17-Field Layout with Complete Aadhaar & Account Numbers
           </p>
         </div>
 
@@ -382,7 +423,7 @@ export default function ParsedRecordsPage() {
                     </td>
                     <td style={{ textAlign: 'center' }}>
                       <button
-                        onClick={() => handleDeleteRecord(r)}
+                        onClick={() => promptDeleteRecord(r)}
                         disabled={deletingId === (r.id || r.user_credit_reference)}
                         className="btn btn-danger"
                         style={{ padding: '3px 8px', fontSize: '0.75rem' }}
@@ -425,6 +466,22 @@ export default function ParsedRecordsPage() {
           </div>
         )}
       </div>
+
+      {/* Custom Application Confirmation Modal */}
+      <Modal
+        isOpen={modalConfig.isOpen}
+        onClose={closeModal}
+        onConfirm={modalConfig.onConfirm}
+        title={modalConfig.title}
+        description={modalConfig.description}
+        confirmText={modalConfig.confirmText}
+        variant={modalConfig.variant}
+        details={modalConfig.details}
+        loading={Boolean(deletingId)}
+      />
+
+      {/* Custom Application Toast Notification */}
+      <Toast toast={toast} onClose={() => setToast(null)} />
     </div>
   );
 }
