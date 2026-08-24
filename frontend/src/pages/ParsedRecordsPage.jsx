@@ -12,9 +12,13 @@ import {
   RefreshCw, 
   FileText, 
   Shield, 
-  Layers,
-  FileArchive,
-  Trash2
+  Layers, 
+  FileArchive, 
+  Trash2,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight
 } from 'lucide-react';
 import { getParsedRecords, getBatch, deleteRecord } from '../services/api';
 import StatusBadge from '../components/StatusBadge';
@@ -173,6 +177,146 @@ export default function ParsedRecordsPage() {
   };
 
   const isProduction = dataSource.includes('Production Database');
+
+  const renderPagination = (recordLabel = 'records') => {
+    if (total === 0) return null;
+
+    const startItem = (page - 1) * pageSize + 1;
+    const endItem = Math.min(page * pageSize, total);
+
+    const pageNumbers = [];
+    const maxVisible = 5;
+    let startPage = Math.max(1, page - Math.floor(maxVisible / 2));
+    let endPage = Math.min(totalPages, startPage + maxVisible - 1);
+    if (endPage - startPage + 1 < maxVisible) {
+      startPage = Math.max(1, endPage - maxVisible + 1);
+    }
+    for (let i = startPage; i <= endPage; i++) {
+      pageNumbers.push(i);
+    }
+
+    return (
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginTop: '16px',
+        paddingTop: '14px',
+        borderTop: '1px solid #e2e8f0',
+        flexWrap: 'wrap',
+        gap: '12px',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '0.85rem', color: '#64748b' }}>
+          <span>
+            Showing <strong style={{ color: '#0f172a' }}>{startItem.toLocaleString()}</strong> to <strong style={{ color: '#0f172a' }}>{endItem.toLocaleString()}</strong> of <strong style={{ color: '#0f172a' }}>{total.toLocaleString()}</strong> {recordLabel}
+          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: '8px' }}>
+            <span style={{ fontSize: '0.8rem' }}>Rows per page:</span>
+            <select
+              value={pageSize}
+              onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
+              style={{ padding: '3px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.8rem', backgroundColor: '#ffffff' }}
+            >
+              <option value={10}>10</option>
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+              <option value={250}>250</option>
+              <option value={500}>500</option>
+              <option value={1000}>All (1000)</option>
+            </select>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <button
+            className="btn btn-secondary"
+            disabled={page <= 1}
+            onClick={() => setPage(1)}
+            style={{ padding: '5px 8px', fontSize: '0.8rem' }}
+            title="First Page"
+          >
+            <ChevronsLeft size={14} />
+          </button>
+
+          <button
+            className="btn btn-secondary"
+            disabled={page <= 1}
+            onClick={() => setPage(p => Math.max(1, p - 1))}
+            style={{ padding: '5px 8px', fontSize: '0.8rem' }}
+            title="Previous Page"
+          >
+            <ChevronLeft size={14} />
+          </button>
+
+          {startPage > 1 && (
+            <>
+              <button
+                className="btn btn-secondary"
+                onClick={() => setPage(1)}
+                style={{ padding: '4px 9px', fontSize: '0.8rem' }}
+              >
+                1
+              </button>
+              {startPage > 2 && <span style={{ padding: '0 4px', color: '#94a3b8' }}>...</span>}
+            </>
+          )}
+
+          {pageNumbers.map(pageNum => (
+            <button
+              key={pageNum}
+              onClick={() => setPage(pageNum)}
+              style={{
+                padding: '4px 10px',
+                fontSize: '0.8rem',
+                fontWeight: pageNum === page ? 700 : 500,
+                borderRadius: '4px',
+                border: pageNum === page ? '1px solid #2563eb' : '1px solid #cbd5e1',
+                backgroundColor: pageNum === page ? '#2563eb' : '#ffffff',
+                color: pageNum === page ? '#ffffff' : '#334155',
+                cursor: 'pointer',
+              }}
+            >
+              {pageNum}
+            </button>
+          ))}
+
+          {endPage < totalPages && (
+            <>
+              {endPage < totalPages - 1 && <span style={{ padding: '0 4px', color: '#94a3b8' }}>...</span>}
+              <button
+                className="btn btn-secondary"
+                onClick={() => setPage(totalPages)}
+                style={{ padding: '4px 9px', fontSize: '0.8rem' }}
+              >
+                {totalPages}
+              </button>
+            </>
+          )}
+
+          <button
+            className="btn btn-secondary"
+            disabled={page >= totalPages}
+            onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+            style={{ padding: '5px 8px', fontSize: '0.8rem' }}
+            title="Next Page"
+          >
+            <ChevronRight size={14} />
+          </button>
+
+          <button
+            className="btn btn-secondary"
+            disabled={page >= totalPages}
+            onClick={() => setPage(totalPages)}
+            style={{ padding: '5px 8px', fontSize: '0.8rem' }}
+            title="Last Page"
+          >
+            <ChevronsRight size={14} />
+          </button>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="app-container">
@@ -337,15 +481,19 @@ export default function ParsedRecordsPage() {
             </h2>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', color: '#64748b' }}>
-            <span>Page {page} of {totalPages}</span>
+            <span>Page {page} of {totalPages} ({total.toLocaleString()} total)</span>
             <select
               value={pageSize}
               onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
-              style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.8rem' }}
+              style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.8rem', backgroundColor: '#ffffff' }}
             >
+              <option value={10}>10 / page</option>
               <option value={25}>25 / page</option>
               <option value={50}>50 / page</option>
               <option value={100}>100 / page</option>
+              <option value={250}>250 / page</option>
+              <option value={500}>500 / page</option>
+              <option value={1000}>All (1000) / page</option>
             </select>
           </div>
         </div>
@@ -384,87 +532,74 @@ export default function ParsedRecordsPage() {
                 </tr>
               </thead>
               <tbody>
-                {records.map((r, idx) => (
-                  <tr key={idx}>
-                    <td style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{(page - 1) * pageSize + idx + 1}</td>
-                    <td><span className="badge badge-ready">{r.apbs_transaction_code || '—'}</span></td>
-                    <td style={{ fontFamily: 'var(--font-mono)' }}>{r.destination_bank_iin || '—'}</td>
-                    <td>{r.destination_account_type || '—'}</td>
-                    <td>{r.ledger_folio_number || '—'}</td>
-                    <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: '#1e293b' }}>
-                      {r.beneficiary_aadhaar_number || '—'}
-                    </td>
-                    <td style={{ fontWeight: 600, color: '#0f172a', minWidth: '130px' }}>
-                      {r.beneficiary_name || '—'}
-                    </td>
-                    <td style={{ fontFamily: 'var(--font-mono)' }}>{r.sponsor_bank_iin || '—'}</td>
-                    <td style={{ fontFamily: 'var(--font-mono)' }}>{r.user_number || '—'}</td>
-                    <td style={{ fontSize: '0.8rem', color: '#475569' }}>{r.user_name_narration || '—'}</td>
-                    <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem' }}>{r.user_credit_reference || '—'}</td>
-                    <td style={{ fontWeight: 700, color: '#15803d' }}>{r.amount || '—'}</td>
-                    <td style={{ fontFamily: 'var(--font-mono)' }}>{r.item_sequence_number || '—'}</td>
-                    <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem' }}>{r.checksum || '—'}</td>
-                    <td>
-                      {r.success_flag === '1' ? (
-                        <span style={{ color: '#15803d', fontWeight: 700 }}>1 (Credited)</span>
-                      ) : r.success_flag === '0' ? (
-                        <span style={{ color: '#b91c1c', fontWeight: 700 }}>0 (Returned)</span>
-                      ) : (
-                        r.success_flag || '—'
-                      )}
-                    </td>
-                    <td style={{ color: '#94a3b8' }}>{r.filler || '—'}</td>
-                    <td><strong>{r.reason_code || '—'}</strong></td>
-                    <td style={{ fontFamily: 'var(--font-mono)', color: '#334155' }}>
-                      {r.destination_bank_account_number || '—'}
-                    </td>
-                    <td style={{ textAlign: 'center' }}>
-                      {getRecordStatusBadge(r.status)}
-                    </td>
-                    <td style={{ textAlign: 'center' }}>
-                      <button
-                        onClick={() => promptDeleteRecord(r)}
-                        disabled={deletingId === (r.id || r.user_credit_reference)}
-                        className="btn btn-danger"
-                        style={{ padding: '3px 8px', fontSize: '0.75rem' }}
-                        title="Delete this record from Database & Staging"
-                      >
-                        <Trash2 size={12} /> Delete
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {records.map((r, idx) => {
+                  const isInvalid = (r.status || '').toUpperCase() === 'INVALID';
+                  return (
+                    <tr key={idx} style={{ backgroundColor: isInvalid ? '#fff5f5' : 'inherit' }}>
+                      <td style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{(page - 1) * pageSize + idx + 1}</td>
+                      <td><span className={isInvalid ? "badge badge-failed" : "badge badge-ready"}>{r.apbs_transaction_code || (isInvalid ? 'ERR' : '—')}</span></td>
+                      <td style={{ fontFamily: 'var(--font-mono)' }}>{r.destination_bank_iin || '—'}</td>
+                      <td>{r.destination_account_type || '—'}</td>
+                      <td>{r.ledger_folio_number || '—'}</td>
+                      <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: isInvalid ? '#b91c1c' : '#1e293b' }}>
+                        {r.beneficiary_aadhaar_number || '—'}
+                      </td>
+                      <td style={{ fontWeight: 600, color: isInvalid ? '#b91c1c' : '#0f172a', minWidth: '130px' }}>
+                        {isInvalid && <AlertTriangle size={12} color="#b91c1c" style={{ display: 'inline', marginRight: '4px' }} />}
+                        {r.beneficiary_name || '—'}
+                      </td>
+                      <td style={{ fontFamily: 'var(--font-mono)' }}>{r.sponsor_bank_iin || '—'}</td>
+                      <td style={{ fontFamily: 'var(--font-mono)' }}>{r.user_number || '—'}</td>
+                      <td style={{ fontSize: '0.8rem', color: '#475569' }}>{r.user_name_narration || '—'}</td>
+                      <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem' }}>{r.user_credit_reference || '—'}</td>
+                      <td style={{ fontWeight: 700, color: isInvalid ? '#b91c1c' : '#15803d' }}>{r.amount || '—'}</td>
+                      <td style={{ fontFamily: 'var(--font-mono)' }}>{r.item_sequence_number || '—'}</td>
+                      <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem' }}>{r.checksum || '—'}</td>
+                      <td>
+                        {r.success_flag === '1' ? (
+                          <span style={{ color: '#15803d', fontWeight: 700 }}>1 (Credited)</span>
+                        ) : r.success_flag === '0' ? (
+                          <span style={{ color: '#b91c1c', fontWeight: 700 }}>0 (Returned)</span>
+                        ) : isInvalid ? (
+                          <span style={{ color: '#b91c1c', fontWeight: 700 }}>Failed</span>
+                        ) : (
+                          r.success_flag || '—'
+                        )}
+                      </td>
+                      <td style={{ color: '#94a3b8' }}>{r.filler || '—'}</td>
+                      <td style={{ color: isInvalid ? '#b91c1c' : 'inherit' }}>
+                        <strong>{r.reason_code || (isInvalid ? r.error_type : '—')}</strong>
+                        {isInvalid && r.error_detail && (
+                          <div style={{ fontSize: '0.7rem', color: '#dc2626' }}>{r.error_detail}</div>
+                        )}
+                      </td>
+                      <td style={{ fontFamily: 'var(--font-mono)', color: '#334155' }}>
+                        {r.destination_bank_account_number || '—'}
+                      </td>
+                      <td style={{ textAlign: 'center' }}>
+                        {getRecordStatusBadge(r.status)}
+                      </td>
+                      <td style={{ textAlign: 'center' }}>
+                        <button
+                          onClick={() => promptDeleteRecord(r)}
+                          disabled={deletingId === (r.id || r.user_credit_reference)}
+                          className="btn btn-danger"
+                          style={{ padding: '3px 8px', fontSize: '0.75rem' }}
+                          title="Delete this record from Database & Staging"
+                        >
+                          <Trash2 size={12} /> Delete
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
 
         {/* Pagination bar */}
-        {totalPages > 1 && (
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px', flexWrap: 'wrap', gap: '10px' }}>
-            <span style={{ fontSize: '0.85rem', color: '#64748b' }}>
-              Showing {((page - 1) * pageSize) + 1} to {Math.min(page * pageSize, total)} of {total} records
-            </span>
-            <div style={{ display: 'flex', gap: '6px' }}>
-              <button
-                className="btn btn-secondary"
-                disabled={page <= 1}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                style={{ padding: '4px 10px', fontSize: '0.8rem' }}
-              >
-                Previous
-              </button>
-              <button
-                className="btn btn-secondary"
-                disabled={page >= totalPages}
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                style={{ padding: '4px 10px', fontSize: '0.8rem' }}
-              >
-                Next
-              </button>
-            </div>
-          </div>
-        )}
+        {renderPagination('records')}
       </div>
 
       {/* Custom Application Confirmation Modal */}

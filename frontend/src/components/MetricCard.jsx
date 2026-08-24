@@ -1,8 +1,18 @@
 import React from 'react';
 
-export default function MetricCard({ title, value, subtitle, icon: Icon, color = '#1d4ed8' }) {
+export default function MetricCard({ title, value, subtitle, icon: Icon, color = '#1d4ed8', onClick }) {
   return (
-    <div className="gov-card" style={{ padding: '18px 20px', position: 'relative', overflow: 'hidden' }}>
+    <div 
+      className="gov-card" 
+      onClick={onClick}
+      style={{ 
+        padding: '18px 20px', 
+        position: 'relative', 
+        overflow: 'hidden',
+        cursor: onClick ? 'pointer' : 'default',
+        transition: 'all 0.15s ease',
+      }}
+    >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
         <span style={{ fontSize: '0.8rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: '#475569' }}>
           {title}

@@ -6,10 +6,11 @@ export default function Modal({
   onClose,
   onConfirm,
   title = "Confirm Action",
-  description = "Are you sure you want to perform this action?",
+  description = null,
   confirmText = "Confirm",
   cancelText = "Cancel",
-  variant = "danger", // 'danger' | 'warning' | 'primary' | 'success'
+  showCancel = true,
+  variant = "danger", // 'danger' | 'warning' | 'primary' | 'success' | 'secondary' | 'info'
   details = null,
   loading = false,
 }) {
@@ -49,6 +50,15 @@ export default function Modal({
           iconBg: '#dcfce7',
           btnBg: '#16a34a',
           btnHoverBg: '#15803d',
+          btnColor: '#ffffff',
+        };
+      case 'secondary':
+      case 'info':
+        return {
+          icon: <ShieldAlert size={24} color="#2563eb" />,
+          iconBg: '#eff6ff',
+          btnBg: '#2563eb',
+          btnHoverBg: '#1d4ed8',
           btnColor: '#ffffff',
         };
       default:
@@ -110,12 +120,14 @@ export default function Modal({
           </div>
 
           <div style={{ flex: 1 }}>
-            <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: '#0f172a', marginBottom: '6px' }}>
+            <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: '#0f172a', marginBottom: description ? '4px' : '0' }}>
               {title}
             </h3>
-            <p style={{ fontSize: '0.875rem', color: '#64748b', lineHeight: 1.5 }}>
-              {description}
-            </p>
+            {description && (
+              <p style={{ fontSize: '0.85rem', color: '#64748b', lineHeight: 1.4 }}>
+                {description}
+              </p>
+            )}
           </div>
 
           <button
@@ -158,19 +170,21 @@ export default function Modal({
           justifyContent: 'flex-end',
           gap: '10px',
         }}>
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={loading}
-            className="btn btn-secondary"
-            style={{ padding: '8px 16px', fontSize: '0.875rem' }}
-          >
-            {cancelText}
-          </button>
+          {showCancel && (
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={loading}
+              className="btn btn-secondary"
+              style={{ padding: '8px 16px', fontSize: '0.875rem' }}
+            >
+              {cancelText}
+            </button>
+          )}
 
           <button
             type="button"
-            onClick={onConfirm}
+            onClick={onConfirm || onClose}
             disabled={loading}
             style={{
               padding: '8px 18px',

@@ -57,6 +57,7 @@ def get_clean_records_preview(batch_id: str, limit: int = 20, mask_pii: bool = T
 def get_error_records_preview(batch_id: str, limit: int = 20) -> List[Dict[str, str]]:
     """
     Read up to `limit` error log rows from the batch errors directory.
+    Includes user identification (Beneficiary name, Aadhaar, Credit Ref).
     """
     batch_paths = get_batch_paths(batch_id)
     errors_dir = str(batch_paths.errors_dir)
@@ -81,6 +82,24 @@ def get_error_records_preview(batch_id: str, limit: int = 20) -> List[Dict[str, 
                     if ":" in part:
                         k, v = part.split(":", 1)
                         entry[k.lower()] = v
+
+                raw = entry.get("raw", "")
+                if len(raw) == settings.APBS_RECORD_LENGTH:
+                    try:
+                        from app.services.apbs_parser import parse_line
+                        parsed = parse_line(raw.replace("¦", "|"))
+                        entry["beneficiary_name"] = parsed.beneficiary_name.strip()
+                        entry["beneficiary_aadhaar_number"] = parsed.beneficiary_aadhaar_number.strip()
+                        entry["user_credit_reference"] = parsed.user_credit_reference.strip()
+                        entry["amount"] = parsed.amount.strip()
+                    except Exception:
+                        pass
+                elif len(raw) >= 31:
+                    raw_restored = raw.replace("¦", "|")
+                    entry["beneficiary_aadhaar_number"] = raw_restored[16:31].strip() if len(raw_restored) >= 31 else ""
+                    entry["beneficiary_name"] = raw_restored[31:71].strip() if len(raw_restored) >= 71 else ""
+                    entry["user_credit_reference"] = raw_restored[107:120].strip() if len(raw_restored) >= 120 else ""
+                    entry["amount"] = raw_restored[120:133].strip() if len(raw_restored) >= 133 else ""
 
                 errors.append(entry)
                 if len(errors) >= limit:

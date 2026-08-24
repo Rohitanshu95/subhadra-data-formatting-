@@ -138,6 +138,7 @@ async def get_batch_parsed_records(
     reason_code: Optional[str] = None,
     status: Optional[str] = None,
     search: Optional[str] = None,
+    refresh: bool = False,
     db: Session = Depends(get_db),
 ):
     """
@@ -157,6 +158,7 @@ async def get_batch_parsed_records(
                 reason_code=reason_code,
                 status_filter=status,
                 search=search,
+                force_refresh=refresh,
             )
 
         batch = default_batch_manager.get_batch(batch_id)
@@ -170,6 +172,7 @@ async def get_batch_parsed_records(
             reason_code=reason_code,
             status_filter=status,
             search=search,
+            force_refresh=refresh,
         )
     except BatchNotFoundError:
         raise HTTPException(status_code=404, detail=f"Batch '{batch_id}' not found")
@@ -436,7 +439,9 @@ async def delete_batch_endpoint(batch_id: str, db: Session = Depends(get_db)):
     Delete a complete batch from database, memory, and physical storage.
     """
     try:
+        from app.services.record_service import clear_records_cache
         res = default_batch_manager.delete_batch(batch_id, db=db)
+        clear_records_cache()
         return res
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete batch: {str(e)}")

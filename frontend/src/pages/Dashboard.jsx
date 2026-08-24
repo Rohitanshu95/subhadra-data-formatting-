@@ -17,7 +17,16 @@ import {
   Filter,
   Shield,
   X,
-  Trash2
+  Trash2,
+  AlertOctagon,
+  User,
+  Eye,
+  FileWarning,
+  Info,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight
 } from 'lucide-react';
 import { listBatches, getOverviewStats, getParsedRecords, deleteBatch, deleteRecord } from '../services/api';
 import MetricCard from '../components/MetricCard';
@@ -26,7 +35,7 @@ import Modal from '../components/Modal';
 import Toast from '../components/Toast';
 
 export default function Dashboard() {
-  const [activeView, setActiveView] = useState('records'); // 'records' (default primary) or 'batches'
+  const [activeView, setActiveView] = useState('records'); // 'records', 'batches', or 'errors'
   const [batches, setBatches] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -48,6 +57,21 @@ export default function Dashboard() {
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [errorTypeFilter, setErrorTypeFilter] = useState('ALL');
+
+  // Multi-selection state for Registered Files batch delete
+  const [selectedBatchIds, setSelectedBatchIds] = useState([]);
+
+  // Inspected raw error record modal state
+  const [inspectedRecord, setInspectedRecord] = useState(null);
+
+  // Manual refresh spinner and success animation states
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshSuccess, setRefreshSuccess] = useState(false);
+
+  // Client-side in-memory session caches to eliminate redundant DB/network calls on tab switches
+  const recordsCacheRef = useRef({});
+  const overviewCacheRef = useRef(null);
 
   // Debounce search input for instant dynamic filtering
   useEffect(() => {
@@ -57,15 +81,23 @@ export default function Dashboard() {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  // Fetch overview stats and batch list
-  const fetchOverviewData = async () => {
+  // Fetch overview stats and batch list (cached per session unless forced)
+  const fetchOverviewData = async (forceRefresh = false) => {
+    if (!forceRefresh && overviewCacheRef.current) {
+      setBatches(overviewCacheRef.current.batches || []);
+      setStats(overviewCacheRef.current.stats || null);
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       const [batchesData, statsData] = await Promise.all([
         listBatches(),
         getOverviewStats().catch(() => null),
       ]);
-      setBatches(batchesData || []);
+      const batchesList = batchesData || [];
+      overviewCacheRef.current = { batches: batchesList, stats: statsData };
+      setBatches(batchesList);
       setStats(statsData);
     } catch (err) {
       console.error("Failed to load overview data", err);
@@ -74,21 +106,59 @@ export default function Dashboard() {
     }
   };
 
-  // Fetch parsed records dynamically
-  const fetchRecordsData = useCallback(async () => {
+  // Fetch parsed records dynamically with client-side caching per tab/view
+  const fetchRecordsData = useCallback(async (forceRefresh = false) => {
+    // Registered Files tab doesn't need parsed record streams
+    if (activeView === 'batches') {
+      return;
+    }
+
+    const cacheKey = JSON.stringify({
+      activeView,
+      selectedBatch,
+      page,
+      pageSize,
+      successFlag: activeView === 'records' ? successFlag : '',
+      reasonCode: activeView === 'records' ? reasonCode.trim() : '',
+      statusFilter: activeView === 'records' ? statusFilter : '',
+      errorTypeFilter: activeView === 'errors' ? errorTypeFilter : '',
+      search: debouncedSearch.trim(),
+    });
+
+    if (!forceRefresh && recordsCacheRef.current[cacheKey]) {
+      const cached = recordsCacheRef.current[cacheKey];
+      setRecords(cached.records || []);
+      setTotalRecords(cached.total || 0);
+      setTotalPages(cached.total_pages || 1);
+      setDataSource(cached.data_source || 'Production Database & Staging');
+      setRecordsLoading(false);
+      return;
+    }
+
     try {
       setRecordsLoading(true);
       const params = {
         page,
         page_size: pageSize,
       };
-      if (successFlag !== '') params.success_flag = successFlag;
-      if (reasonCode.trim() !== '') params.reason_code = reasonCode.trim();
-      if (statusFilter !== 'ALL') params.status = statusFilter;
+
+      if (activeView === 'errors') {
+        params.status = 'Invalid';
+        if (errorTypeFilter !== 'ALL') {
+          params.reason_code = errorTypeFilter;
+        }
+      } else {
+        if (successFlag !== '') params.success_flag = successFlag;
+        if (reasonCode.trim() !== '') params.reason_code = reasonCode.trim();
+        if (statusFilter !== 'ALL') params.status = statusFilter;
+      }
+
       if (debouncedSearch.trim() !== '') params.search = debouncedSearch.trim();
+      if (forceRefresh) params.refresh = true;
 
       const batchTarget = selectedBatch && selectedBatch !== 'ALL' ? selectedBatch : 'all';
       const data = await getParsedRecords(batchTarget, params);
+      recordsCacheRef.current[cacheKey] = data;
       setRecords(data.records || []);
       setTotalRecords(data.total || 0);
       setTotalPages(data.total_pages || 1);
@@ -98,7 +168,29 @@ export default function Dashboard() {
     } finally {
       setRecordsLoading(false);
     }
-  }, [selectedBatch, page, pageSize, successFlag, reasonCode, statusFilter, debouncedSearch]);
+  }, [activeView, selectedBatch, page, pageSize, successFlag, reasonCode, statusFilter, errorTypeFilter, debouncedSearch]);
+
+  const handleManualRefresh = async () => {
+    setIsRefreshing(true);
+    setRefreshSuccess(false);
+    recordsCacheRef.current = {};
+    overviewCacheRef.current = null;
+    try {
+      await Promise.all([
+        fetchOverviewData(true),
+        activeView !== 'batches' ? fetchRecordsData(true) : Promise.resolve(),
+      ]);
+      setRefreshSuccess(true);
+      showToast('Dashboard data refreshed successfully.');
+      setTimeout(() => {
+        setRefreshSuccess(false);
+      }, 3000);
+    } catch (err) {
+      showToast('Failed to refresh data.', 'error');
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   useEffect(() => {
     fetchOverviewData();
@@ -113,6 +205,7 @@ export default function Dashboard() {
     setSuccessFlag('');
     setReasonCode('');
     setStatusFilter('ALL');
+    setErrorTypeFilter('ALL');
     setSearchQuery('');
     setDebouncedSearch('');
     setPage(1);
@@ -157,10 +250,87 @@ export default function Dashboard() {
           setDeletingId(batchId);
           await deleteBatch(batchId);
           showToast(`Batch "${batchId}" and associated records deleted.`);
+          setSelectedBatchIds(prev => prev.filter(id => id !== batchId));
+          recordsCacheRef.current = {};
+          overviewCacheRef.current = null;
           closeModal();
-          await Promise.all([fetchOverviewData(), fetchRecordsData()]);
+          await Promise.all([fetchOverviewData(true), fetchRecordsData(true)]);
         } catch (err) {
           showToast(`Failed to delete batch: ${err.response?.data?.detail || err.message}`, 'error');
+        } finally {
+          setDeletingId(null);
+        }
+      }
+    });
+  };
+
+  // Batch multi-selection handlers
+  const handleToggleSelectBatch = (batchId) => {
+    setSelectedBatchIds(prev =>
+      prev.includes(batchId) ? prev.filter(id => id !== batchId) : [...prev, batchId]
+    );
+  };
+
+  const handleSelectAllBatches = (e) => {
+    if (e.target.checked) {
+      setSelectedBatchIds(batches.map(b => b.batch_id));
+    } else {
+      setSelectedBatchIds([]);
+    }
+  };
+
+  // Bulk batch deletion handler with custom Modal
+  const promptDeleteSelectedBatches = () => {
+    if (selectedBatchIds.length === 0) return;
+
+    const count = selectedBatchIds.length;
+    const selectedBatchesInfo = batches.filter(b => selectedBatchIds.includes(b.batch_id));
+    const totalAffectedRecords = selectedBatchesInfo.reduce((acc, b) => acc + (b.total_records || 0), 0);
+
+    setModalConfig({
+      isOpen: true,
+      title: `Delete ${count} Selected Registered File${count !== 1 ? 's' : ''}`,
+      description: `Are you sure you want to permanently delete the ${count} selected registered file(s)? All corresponding database transactions, audit logs, and storage artifacts will be removed.`,
+      confirmText: `Delete ${count} File${count !== 1 ? 's' : ''}`,
+      variant: 'danger',
+      details: (
+        <div>
+          <div style={{ marginBottom: '8px', maxHeight: '140px', overflowY: 'auto', background: '#ffffff', padding: '8px', border: '1px solid #e2e8f0', borderRadius: '4px' }}>
+            {selectedBatchesInfo.map(b => (
+              <div key={b.batch_id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', padding: '3px 0', borderBottom: '1px solid #f1f5f9' }}>
+                <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: '#0f172a' }}>{b.batch_id}</span>
+                <span style={{ color: '#64748b' }}>{b.total_records?.toLocaleString() || 0} records</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#0f172a', marginBottom: '6px' }}>
+            Total Records Affected: <span style={{ color: '#dc2626' }}>{totalAffectedRecords.toLocaleString()}</span>
+          </div>
+          <div style={{ color: '#b91c1c', fontSize: '0.8rem' }}>
+            ⚠️ This action is permanent and cannot be undone.
+          </div>
+        </div>
+      ),
+      onConfirm: async () => {
+        try {
+          setDeletingId('BULK_BATCH_DELETE');
+          const results = await Promise.allSettled(selectedBatchIds.map(id => deleteBatch(id)));
+          const successCount = results.filter(r => r.status === 'fulfilled').length;
+          const failedCount = results.filter(r => r.status === 'rejected').length;
+
+          if (failedCount === 0) {
+            showToast(`Successfully deleted ${successCount} file(s) and their database records.`);
+          } else {
+            showToast(`Deleted ${successCount} file(s), ${failedCount} failed.`, 'warning');
+          }
+
+          setSelectedBatchIds([]);
+          recordsCacheRef.current = {};
+          overviewCacheRef.current = null;
+          closeModal();
+          await Promise.all([fetchOverviewData(true), fetchRecordsData(true)]);
+        } catch (err) {
+          showToast(`Error during bulk deletion: ${err.message}`, 'error');
         } finally {
           setDeletingId(null);
         }
@@ -198,8 +368,10 @@ export default function Dashboard() {
             batch_id: record.batch_id,
           });
           showToast(`Transaction for "${beneficiary}" deleted from database.`);
+          recordsCacheRef.current = {};
+          overviewCacheRef.current = null;
           closeModal();
-          await Promise.all([fetchOverviewData(), fetchRecordsData()]);
+          await Promise.all([fetchOverviewData(true), fetchRecordsData(true)]);
         } catch (err) {
           showToast(`Failed to delete record: ${err.response?.data?.detail || err.message}`, 'error');
         } finally {
@@ -272,6 +444,147 @@ export default function Dashboard() {
     );
   };
 
+  const renderPagination = (recordLabel = 'records') => {
+    if (totalRecords === 0) return null;
+
+    const startItem = (page - 1) * pageSize + 1;
+    const endItem = Math.min(page * pageSize, totalRecords);
+
+    // Generate visible page numbers (max 5 around current page)
+    const pageNumbers = [];
+    const maxVisible = 5;
+    let startPage = Math.max(1, page - Math.floor(maxVisible / 2));
+    let endPage = Math.min(totalPages, startPage + maxVisible - 1);
+    if (endPage - startPage + 1 < maxVisible) {
+      startPage = Math.max(1, endPage - maxVisible + 1);
+    }
+    for (let i = startPage; i <= endPage; i++) {
+      pageNumbers.push(i);
+    }
+
+    return (
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginTop: '16px',
+        paddingTop: '14px',
+        borderTop: '1px solid #e2e8f0',
+        flexWrap: 'wrap',
+        gap: '12px',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '0.85rem', color: '#64748b' }}>
+          <span>
+            Showing <strong style={{ color: '#0f172a' }}>{startItem.toLocaleString()}</strong> to <strong style={{ color: '#0f172a' }}>{endItem.toLocaleString()}</strong> of <strong style={{ color: '#0f172a' }}>{totalRecords.toLocaleString()}</strong> {recordLabel}
+          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: '8px' }}>
+            <span style={{ fontSize: '0.8rem' }}>Rows per page:</span>
+            <select
+              value={pageSize}
+              onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
+              style={{ padding: '3px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.8rem', backgroundColor: '#ffffff' }}
+            >
+              <option value={10}>10</option>
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+              <option value={250}>250</option>
+              <option value={500}>500</option>
+              <option value={1000}>All (1000)</option>
+            </select>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <button
+            className="btn btn-secondary"
+            disabled={page <= 1}
+            onClick={() => setPage(1)}
+            style={{ padding: '5px 8px', fontSize: '0.8rem' }}
+            title="First Page"
+          >
+            <ChevronsLeft size={14} />
+          </button>
+
+          <button
+            className="btn btn-secondary"
+            disabled={page <= 1}
+            onClick={() => setPage(p => Math.max(1, p - 1))}
+            style={{ padding: '5px 8px', fontSize: '0.8rem' }}
+            title="Previous Page"
+          >
+            <ChevronLeft size={14} />
+          </button>
+
+          {startPage > 1 && (
+            <>
+              <button
+                className="btn btn-secondary"
+                onClick={() => setPage(1)}
+                style={{ padding: '4px 9px', fontSize: '0.8rem' }}
+              >
+                1
+              </button>
+              {startPage > 2 && <span style={{ padding: '0 4px', color: '#94a3b8' }}>...</span>}
+            </>
+          )}
+
+          {pageNumbers.map(pageNum => (
+            <button
+              key={pageNum}
+              onClick={() => setPage(pageNum)}
+              style={{
+                padding: '4px 10px',
+                fontSize: '0.8rem',
+                fontWeight: pageNum === page ? 700 : 500,
+                borderRadius: '4px',
+                border: pageNum === page ? '1px solid #2563eb' : '1px solid #cbd5e1',
+                backgroundColor: pageNum === page ? '#2563eb' : '#ffffff',
+                color: pageNum === page ? '#ffffff' : '#334155',
+                cursor: 'pointer',
+              }}
+            >
+              {pageNum}
+            </button>
+          ))}
+
+          {endPage < totalPages && (
+            <>
+              {endPage < totalPages - 1 && <span style={{ padding: '0 4px', color: '#94a3b8' }}>...</span>}
+              <button
+                className="btn btn-secondary"
+                onClick={() => setPage(totalPages)}
+                style={{ padding: '4px 9px', fontSize: '0.8rem' }}
+              >
+                {totalPages}
+              </button>
+            </>
+          )}
+
+          <button
+            className="btn btn-secondary"
+            disabled={page >= totalPages}
+            onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+            style={{ padding: '5px 8px', fontSize: '0.8rem' }}
+            title="Next Page"
+          >
+            <ChevronRight size={14} />
+          </button>
+
+          <button
+            className="btn btn-secondary"
+            disabled={page >= totalPages}
+            onClick={() => setPage(totalPages)}
+            style={{ padding: '5px 8px', fontSize: '0.8rem' }}
+            title="Last Page"
+          >
+            <ChevronsRight size={14} />
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="app-container">
       {/* Header section */}
@@ -286,12 +599,31 @@ export default function Dashboard() {
         </div>
         <div style={{ display: 'flex', gap: '10px' }}>
           <button 
-            onClick={() => { fetchOverviewData(); fetchRecordsData(); }} 
-            className="btn btn-secondary"
-            title="Refresh"
+            onClick={handleManualRefresh} 
+            disabled={isRefreshing || loading || recordsLoading}
+            className={`btn ${refreshSuccess ? 'btn-success' : 'btn-secondary'}`}
+            style={{
+              transition: 'all 0.25s ease',
+              backgroundColor: refreshSuccess ? '#dcfce7' : '',
+              color: refreshSuccess ? '#15803d' : '',
+              borderColor: refreshSuccess ? '#86efac' : '',
+            }}
+            title="Refresh dashboard data from database"
           >
-            <RefreshCw size={15} className={loading || recordsLoading ? 'animate-spin' : ''} />
-            Refresh
+            {refreshSuccess ? (
+              <>
+                <CheckCircle2 size={15} color="#15803d" />
+                <span>Refreshed!</span>
+              </>
+            ) : (
+              <>
+                <RefreshCw 
+                  size={15} 
+                  className={isRefreshing || loading || recordsLoading ? 'animate-spin' : ''} 
+                />
+                <span>{isRefreshing ? 'Refreshing...' : 'Refresh'}</span>
+              </>
+            )}
           </button>
           <Link to="/batches/new" className="btn btn-primary">
             <PlusCircle size={15} />
@@ -308,6 +640,7 @@ export default function Dashboard() {
           subtitle="Processed across all batches" 
           icon={Layers} 
           color="#1d4ed8" 
+          onClick={() => { setActiveView('records'); setStatusFilter('ALL'); setPage(1); }}
         />
         <MetricCard 
           title="Awaiting Verification" 
@@ -315,6 +648,7 @@ export default function Dashboard() {
           subtitle="Processed, pending review" 
           icon={Clock} 
           color="#7e22ce" 
+          onClick={() => { setActiveView('records'); setStatusFilter('Pending Verification'); setPage(1); }}
         />
         <MetricCard 
           title="Committed to DB" 
@@ -322,6 +656,7 @@ export default function Dashboard() {
           subtitle="Unique records inserted in SQL" 
           icon={Database} 
           color="#15803d" 
+          onClick={() => { setActiveView('records'); setStatusFilter('Committed'); setPage(1); }}
         />
         <MetricCard 
           title="Duplicates Skipped" 
@@ -329,21 +664,23 @@ export default function Dashboard() {
           subtitle="File & record duplicate collisions" 
           icon={CopyCheck} 
           color="#b45309" 
+          onClick={() => { setActiveView('records'); setStatusFilter('Duplicate'); setPage(1); }}
         />
         <MetricCard 
           title="Failed / Invalid Records" 
           value={failedRecords.toLocaleString()} 
-          subtitle="Schema & length violations" 
+          subtitle="Schema & length violations (Click to inspect)" 
           icon={AlertTriangle} 
           color="#b91c1c" 
+          onClick={() => { setActiveView('errors'); setErrorTypeFilter('ALL'); setPage(1); }}
         />
       </div>
 
       {/* Main View Mode Selector Tabs */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
-        <div style={{ display: 'flex', gap: '6px', background: '#e2e8f0', padding: '4px', borderRadius: '6px' }}>
+        <div style={{ display: 'flex', gap: '6px', background: '#e2e8f0', padding: '4px', borderRadius: '6px', flexWrap: 'wrap' }}>
           <button
-            onClick={() => setActiveView('records')}
+            onClick={() => { setActiveView('records'); setPage(1); }}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -360,7 +697,40 @@ export default function Dashboard() {
             }}
           >
             <Table size={15} />
-            Parsed APBS Records ({totalRecords.toLocaleString()})
+            Parsed APBS Records {activeView === 'records' && `(${totalRecords.toLocaleString()})`}
+          </button>
+
+          <button
+            onClick={() => { setActiveView('errors'); setPage(1); }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '8px 16px',
+              borderRadius: '4px',
+              border: 'none',
+              fontWeight: 700,
+              fontSize: '0.875rem',
+              cursor: 'pointer',
+              background: activeView === 'errors' ? '#ffffff' : 'transparent',
+              color: activeView === 'errors' ? '#b91c1c' : failedRecords > 0 ? '#b91c1c' : '#64748b',
+              boxShadow: activeView === 'errors' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+            }}
+          >
+            <AlertTriangle size={15} color={activeView === 'errors' || failedRecords > 0 ? '#b91c1c' : '#64748b'} />
+            Error & Invalid Records Log
+            {failedRecords > 0 && (
+              <span style={{
+                background: activeView === 'errors' ? '#fee2e2' : '#fecaca',
+                color: '#b91c1c',
+                padding: '1px 6px',
+                borderRadius: '10px',
+                fontSize: '0.75rem',
+                fontWeight: 800,
+              }}>
+                {failedRecords.toLocaleString()}
+              </span>
+            )}
           </button>
 
           <button
@@ -389,6 +759,13 @@ export default function Dashboard() {
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', color: '#166534', background: '#f0fdf4', border: '1px solid #bbf7d0', padding: '4px 10px', borderRadius: '4px' }}>
             <CheckCircle2 size={15} color="#16a34a" />
             <span style={{ fontWeight: 600 }}>Full Unmasked Data View Active</span>
+          </div>
+        )}
+
+        {activeView === 'errors' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', color: '#991b1b', background: '#fef2f2', border: '1px solid #fecaca', padding: '4px 10px', borderRadius: '4px' }}>
+            <AlertOctagon size={15} color="#dc2626" />
+            <span style={{ fontWeight: 600 }}>Validation & Length Error Diagnostics Log</span>
           </div>
         )}
       </div>
@@ -432,7 +809,7 @@ export default function Dashboard() {
                   <option value="Committed">Committed</option>
                   <option value="Duplicate">Duplicate</option>
                   <option value="Pending Verification">Pending Verification</option>
-                  <option value="Invalid">Invalid</option>
+                  <option value="Invalid">Invalid (Error Records)</option>
                 </select>
               </div>
 
@@ -513,15 +890,19 @@ export default function Dashboard() {
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', color: '#64748b' }}>
-                <span>Page {page} of {totalPages}</span>
+                <span>Page {page} of {totalPages} ({totalRecords.toLocaleString()} total)</span>
                 <select
                   value={pageSize}
                   onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
-                  style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.8rem' }}
+                  style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.8rem', backgroundColor: '#ffffff' }}
                 >
+                  <option value={10}>10 / page</option>
                   <option value={25}>25 / page</option>
                   <option value={50}>50 / page</option>
                   <option value={100}>100 / page</option>
+                  <option value={250}>250 / page</option>
+                  <option value={500}>500 / page</option>
+                  <option value={1000}>All (1000) / page</option>
                 </select>
               </div>
             </div>
@@ -566,56 +947,306 @@ export default function Dashboard() {
                     </tr>
                   </thead>
                   <tbody>
+                    {records.map((r, idx) => {
+                      const isInvalid = r.status === 'Invalid';
+                      return (
+                        <tr key={idx} style={{ backgroundColor: isInvalid ? '#fff5f5' : 'inherit' }}>
+                          <td style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{(page - 1) * pageSize + idx + 1}</td>
+                          <td><span className={isInvalid ? "badge badge-failed" : "badge badge-ready"}>{r.apbs_transaction_code || (isInvalid ? 'ERR' : '—')}</span></td>
+                          <td style={{ fontFamily: 'var(--font-mono)' }}>{r.destination_bank_iin || '—'}</td>
+                          <td>{r.destination_account_type || '—'}</td>
+                          <td>{r.ledger_folio_number || '—'}</td>
+                          <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: isInvalid ? '#b91c1c' : '#1e293b' }}>
+                            {r.beneficiary_aadhaar_number || '—'}
+                          </td>
+                          <td style={{ fontWeight: 600, color: isInvalid ? '#b91c1c' : '#0f172a', minWidth: '130px' }}>
+                            {isInvalid && <AlertTriangle size={12} color="#b91c1c" style={{ display: 'inline', marginRight: '4px' }} />}
+                            {r.beneficiary_name || '—'}
+                          </td>
+                          <td style={{ fontFamily: 'var(--font-mono)' }}>{r.sponsor_bank_iin || '—'}</td>
+                          <td style={{ fontFamily: 'var(--font-mono)' }}>{r.user_number || '—'}</td>
+                          <td style={{ fontSize: '0.8rem', color: '#475569' }}>{r.user_name_narration || '—'}</td>
+                          <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem' }}>{r.user_credit_reference || '—'}</td>
+                          <td style={{ fontWeight: 700, color: isInvalid ? '#b91c1c' : '#15803d' }}>{r.amount || '—'}</td>
+                          <td style={{ fontFamily: 'var(--font-mono)' }}>{r.item_sequence_number || '—'}</td>
+                          <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem' }}>{r.checksum || '—'}</td>
+                          <td>
+                            {r.success_flag === '1' || r.success_flag?.startsWith('1') ? (
+                              <span style={{ color: '#15803d', fontWeight: 700 }}>1 (Credited)</span>
+                            ) : r.success_flag === '0' || r.success_flag?.startsWith('0') ? (
+                              <span style={{ color: '#b91c1c', fontWeight: 700 }}>0 (Returned)</span>
+                            ) : isInvalid ? (
+                              <span style={{ color: '#b91c1c', fontWeight: 700 }}>Failed</span>
+                            ) : (
+                              r.success_flag || '—'
+                            )}
+                          </td>
+                          <td style={{ color: '#94a3b8' }}>{r.filler || '—'}</td>
+                          <td style={{ color: isInvalid ? '#b91c1c' : 'inherit' }}>
+                            <strong>{r.reason_code || (isInvalid ? r.error_type : '—')}</strong>
+                            {isInvalid && r.error_detail && (
+                              <div style={{ fontSize: '0.7rem', color: '#dc2626' }}>{r.error_detail}</div>
+                            )}
+                          </td>
+                          <td style={{ fontFamily: 'var(--font-mono)', color: '#334155' }}>
+                            {r.destination_bank_account_number || '—'}
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            {getRecordStatusBadge(r.status)}
+                          </td>
+                          <td style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                            {r._source_file || r.batch_id || '—'}
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <div style={{ display: 'inline-flex', gap: '4px' }}>
+                              {isInvalid && (
+                                <button
+                                  onClick={() => setInspectedRecord(r)}
+                                  className="btn btn-secondary"
+                                  style={{ padding: '3px 8px', fontSize: '0.75rem', borderColor: '#fca5a5', color: '#b91c1c' }}
+                                  title="Inspect full raw error data"
+                                >
+                                  <Eye size={12} /> Inspect
+                                </button>
+                              )}
+                              <button
+                                onClick={() => promptDeleteRecord(r)}
+                                disabled={deletingId === (r.id || r.user_credit_reference)}
+                                className="btn btn-danger"
+                                style={{ padding: '3px 8px', fontSize: '0.75rem' }}
+                                title="Delete this record from Database & Staging"
+                              >
+                                <Trash2 size={12} /> Delete
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Pagination bar */}
+            {renderPagination('clean records')}
+          </div>
+        </>
+      )}
+
+      {/* VIEW 2: ERROR & INVALID RECORDS LOG VIEW */}
+      {activeView === 'errors' && (
+        <>
+          {/* Dynamic Error Filters Card */}
+          <div className="gov-card" style={{ padding: '16px', marginBottom: '18px', borderLeft: '4px solid #b91c1c' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px', alignItems: 'end' }}>
+              {/* Batch Filter Dropdown */}
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
+                  Filter by File
+                </label>
+                <select
+                  value={selectedBatch}
+                  onChange={(e) => { setSelectedBatch(e.target.value); setPage(1); }}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.875rem', backgroundColor: '#ffffff' }}
+                >
+                  <option value="ALL">All Registered Files</option>
+                  {batches.map((b) => (
+                    <option key={b.batch_id} value={b.batch_id}>
+                      {b.batch_id} ({b.invalid_records} errors)
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Error Classification Filter */}
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
+                  Error Classification
+                </label>
+                <select
+                  value={errorTypeFilter}
+                  onChange={(e) => { setErrorTypeFilter(e.target.value); setPage(1); }}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.875rem', backgroundColor: '#ffffff' }}
+                >
+                  <option value="ALL">All Error Classifications</option>
+                  <option value="INVALID_RECORD_LENGTH">INVALID_RECORD_LENGTH (Length ≠ 177)</option>
+                  <option value="INVALID_CHECKSUM">INVALID_CHECKSUM (Mod 11 Failed)</option>
+                  <option value="REQUIRED_FIELD_MISSING">REQUIRED_FIELD_MISSING</option>
+                  <option value="INVALID_NUMERIC">INVALID_NUMERIC (Non-numeric digits)</option>
+                  <option value="INVALID_TRANSACTION_CODE">INVALID_TRANSACTION_CODE</option>
+                </select>
+              </div>
+
+              {/* Search Query for Beneficiary / Aadhaar / Error Details */}
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
+                  Search by Beneficiary / Aadhaar / Ref / Reason
+                </label>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type="text"
+                    placeholder="Search error logs..."
+                    value={searchQuery}
+                    onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
+                    style={{ width: '100%', padding: '8px 10px 8px 30px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.875rem' }}
+                  />
+                  <Search size={14} color="#94a3b8" style={{ position: 'absolute', left: '10px', top: '10px' }} />
+                  {searchQuery && (
+                    <button
+                      onClick={() => { setSearchQuery(''); setPage(1); }}
+                      style={{ position: 'absolute', right: '8px', top: '8px', background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Clear Action */}
+              <div>
+                <button 
+                  type="button" 
+                  onClick={handleClearFilters} 
+                  className="btn btn-secondary"
+                  style={{ width: '100%', padding: '8px 14px' }}
+                >
+                  Clear Filters
+                </button>
+              </div>
+            </div>
+
+            <div style={{ marginTop: '12px', fontSize: '0.825rem', color: '#b91c1c', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Info size={14} />
+              <span>Showing invalid records with extracted <strong>Beneficiary Name</strong>, <strong>Aadhaar Number</strong>, line numbers, and error root-cause diagnostics.</span>
+            </div>
+          </div>
+
+          {/* Error Records Table Card */}
+          <div className="gov-card" style={{ padding: '18px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <AlertTriangle size={18} color="#b91c1c" />
+                <h2 style={{ fontSize: '1.1rem', color: '#0f172a' }}>
+                  Invalid APBS Records Log
+                </h2>
+                <span style={{ fontSize: '0.8rem', color: '#64748b', fontWeight: 600 }}>
+                  — Parsed failure diagnostics with complete user identification
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', color: '#64748b' }}>
+                <span>Page {page} of {totalPages} ({totalRecords.toLocaleString()} errors)</span>
+                <select
+                  value={pageSize}
+                  onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
+                  style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.8rem', backgroundColor: '#ffffff' }}
+                >
+                  <option value={10}>10 / page</option>
+                  <option value={25}>25 / page</option>
+                  <option value={50}>50 / page</option>
+                  <option value={100}>100 / page</option>
+                  <option value={250}>250 / page</option>
+                  <option value={500}>500 / page</option>
+                  <option value={1000}>All (1000) / page</option>
+                </select>
+              </div>
+            </div>
+
+            {records.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '48px 20px', color: '#15803d', background: '#f0fdf4', borderRadius: '4px', border: '1px solid #bbf7d0' }}>
+                <CheckCircle2 size={36} color="#15803d" style={{ margin: '0 auto 8px' }} />
+                <p style={{ fontWeight: 700, fontSize: '1.05rem', color: '#15803d' }}>No invalid records found</p>
+                <p style={{ fontSize: '0.85rem', color: '#166534' }}>
+                  {hasActiveFilters ? 'No error records matched the active filters.' : 'All parsed records in the system are valid and clean!'}
+                </p>
+                {hasActiveFilters && (
+                  <button onClick={handleClearFilters} className="btn btn-secondary" style={{ marginTop: '10px' }}>
+                    Reset Filters
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="table-container" style={{ maxHeight: '620px', overflowX: 'auto' }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th style={{ whiteSpace: 'nowrap' }}>#</th>
+                      <th style={{ whiteSpace: 'nowrap' }}>LINE #</th>
+                      <th style={{ whiteSpace: 'nowrap' }}>BENEFICIARY / USER IDENTITY</th>
+                      <th style={{ whiteSpace: 'nowrap' }}>AADHAAR NUMBER</th>
+                      <th style={{ whiteSpace: 'nowrap' }}>CREDIT REF</th>
+                      <th style={{ whiteSpace: 'nowrap' }}>AMOUNT (PAISE)</th>
+                      <th style={{ whiteSpace: 'nowrap' }}>ERROR CLASSIFICATION</th>
+                      <th style={{ whiteSpace: 'nowrap' }}>DIAGNOSTIC FAILURE REASON</th>
+                      <th style={{ whiteSpace: 'nowrap' }}>SOURCE FILE</th>
+                      <th style={{ whiteSpace: 'nowrap', textAlign: 'center' }}>ACTIONS</th>
+                    </tr>
+                  </thead>
+                  <tbody>
                     {records.map((r, idx) => (
-                      <tr key={idx}>
+                      <tr key={idx} style={{ backgroundColor: '#fff8f8' }}>
                         <td style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{(page - 1) * pageSize + idx + 1}</td>
-                        <td><span className="badge badge-ready">{r.apbs_transaction_code || '—'}</span></td>
-                        <td style={{ fontFamily: 'var(--font-mono)' }}>{r.destination_bank_iin || '—'}</td>
-                        <td>{r.destination_account_type || '—'}</td>
-                        <td>{r.ledger_folio_number || '—'}</td>
-                        <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: '#1e293b' }}>
+                        <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#0f172a' }}>
+                          {r.line_no ? `Line ${r.line_no}` : '—'}
+                        </td>
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <div style={{ width: '22px', height: '22px', borderRadius: '50%', background: '#fee2e2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <User size={12} color="#b91c1c" />
+                            </div>
+                            <div>
+                              <div style={{ fontWeight: 700, color: '#0f172a' }}>
+                                {r.beneficiary_name || 'Unidentified Beneficiary'}
+                              </div>
+                              {r.destination_bank_account_number && (
+                                <div style={{ fontSize: '0.75rem', color: '#64748b', fontFamily: 'var(--font-mono)' }}>
+                                  A/C: {r.destination_bank_account_number} {r.destination_bank_iin ? `(${r.destination_bank_iin})` : ''}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                        <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#b91c1c' }}>
                           {r.beneficiary_aadhaar_number || '—'}
                         </td>
-                        <td style={{ fontWeight: 600, color: '#0f172a', minWidth: '130px' }}>
-                          {r.beneficiary_name || '—'}
+                        <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem' }}>
+                          {r.user_credit_reference || '—'}
                         </td>
-                        <td style={{ fontFamily: 'var(--font-mono)' }}>{r.sponsor_bank_iin || '—'}</td>
-                        <td style={{ fontFamily: 'var(--font-mono)' }}>{r.user_number || '—'}</td>
-                        <td style={{ fontSize: '0.8rem', color: '#475569' }}>{r.user_name_narration || '—'}</td>
-                        <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem' }}>{r.user_credit_reference || '—'}</td>
-                        <td style={{ fontWeight: 700, color: '#15803d' }}>{r.amount || '—'}</td>
-                        <td style={{ fontFamily: 'var(--font-mono)' }}>{r.item_sequence_number || '—'}</td>
-                        <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem' }}>{r.checksum || '—'}</td>
+                        <td style={{ fontWeight: 700, color: '#475569' }}>
+                          {r.amount || '—'}
+                        </td>
                         <td>
-                          {r.success_flag === '1' || r.success_flag?.startsWith('1') ? (
-                            <span style={{ color: '#15803d', fontWeight: 700 }}>1 (Credited)</span>
-                          ) : r.success_flag === '0' || r.success_flag?.startsWith('0') ? (
-                            <span style={{ color: '#b91c1c', fontWeight: 700 }}>0 (Returned)</span>
-                          ) : (
-                            r.success_flag || '—'
-                          )}
+                          <span className="badge badge-failed" style={{ fontSize: '0.75rem' }}>
+                            {r.error_type || r.reason_code || 'INVALID_RECORD'}
+                          </span>
                         </td>
-                        <td style={{ color: '#94a3b8' }}>{r.filler || '—'}</td>
-                        <td><strong>{r.reason_code || '—'}</strong></td>
-                        <td style={{ fontFamily: 'var(--font-mono)', color: '#334155' }}>
-                          {r.destination_bank_account_number || '—'}
-                        </td>
-                        <td style={{ textAlign: 'center' }}>
-                          {getRecordStatusBadge(r.status)}
+                        <td style={{ color: '#b91c1c', fontWeight: 600, fontSize: '0.825rem', maxWidth: '280px' }}>
+                          {r.error_detail || r.reason_code || 'Validation check failure'}
                         </td>
                         <td style={{ fontSize: '0.75rem', color: '#64748b' }}>
                           {r._source_file || r.batch_id || '—'}
                         </td>
                         <td style={{ textAlign: 'center' }}>
-                          <button
-                            onClick={() => promptDeleteRecord(r)}
-                            disabled={deletingId === (r.id || r.user_credit_reference)}
-                            className="btn btn-danger"
-                            style={{ padding: '3px 8px', fontSize: '0.75rem' }}
-                            title="Delete this record from Database & Staging"
-                          >
-                            <Trash2 size={12} /> Delete
-                          </button>
+                          <div style={{ display: 'inline-flex', gap: '4px' }}>
+                            <button
+                              onClick={() => setInspectedRecord(r)}
+                              className="btn btn-secondary"
+                              style={{ padding: '3px 8px', fontSize: '0.75rem', borderColor: '#fca5a5', color: '#b91c1c', background: '#ffffff' }}
+                              title="Inspect raw character breakdown and error analysis"
+                            >
+                              <Eye size={12} /> Inspect
+                            </button>
+                            <button
+                              onClick={() => promptDeleteRecord(r)}
+                              disabled={deletingId === (r.id || r.user_credit_reference)}
+                              className="btn btn-danger"
+                              style={{ padding: '3px 8px', fontSize: '0.75rem' }}
+                              title="Delete this record"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -625,36 +1256,12 @@ export default function Dashboard() {
             )}
 
             {/* Pagination bar */}
-            {totalPages > 1 && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px', flexWrap: 'wrap', gap: '10px' }}>
-                <span style={{ fontSize: '0.85rem', color: '#64748b' }}>
-                  Showing {((page - 1) * pageSize) + 1} to {Math.min(page * pageSize, totalRecords)} of {totalRecords} records
-                </span>
-                <div style={{ display: 'flex', gap: '6px' }}>
-                  <button
-                    className="btn btn-secondary"
-                    disabled={page <= 1}
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    style={{ padding: '4px 10px', fontSize: '0.8rem' }}
-                  >
-                    Previous
-                  </button>
-                  <button
-                    className="btn btn-secondary"
-                    disabled={page >= totalPages}
-                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                    style={{ padding: '4px 10px', fontSize: '0.8rem' }}
-                  >
-                    Next
-                  </button>
-                </div>
-              </div>
-            )}
+            {renderPagination('error records')}
           </div>
         </>
       )}
 
-      {/* VIEW 2: REGISTERED FILES TABLE */}
+      {/* VIEW 3: REGISTERED FILES TABLE */}
       {activeView === 'batches' && (
         <div className="gov-card" style={{ padding: '20px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
@@ -666,6 +1273,44 @@ export default function Dashboard() {
               Showing all active & SQL-synchronized files
             </span>
           </div>
+
+          {/* Multi-Selection Action Toolbar */}
+          {selectedBatchIds.length > 0 && (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '12px 16px',
+              marginBottom: '14px',
+              backgroundColor: '#eff6ff',
+              border: '1px solid #bfdbfe',
+              borderRadius: '6px',
+              animation: 'fadeIn 0.15s ease-out'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span style={{ fontSize: '0.875rem', fontWeight: 700, color: '#1d4ed8' }}>
+                  {selectedBatchIds.length} of {batches.length} file{batches.length !== 1 ? 's' : ''} selected
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedBatchIds([])}
+                  className="btn btn-secondary"
+                  style={{ padding: '3px 10px', fontSize: '0.75rem' }}
+                >
+                  Clear Selection
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={promptDeleteSelectedBatches}
+                disabled={deletingId === 'BULK_BATCH_DELETE'}
+                className="btn btn-danger"
+                style={{ padding: '6px 14px', fontSize: '0.825rem', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+              >
+                <Trash2 size={14} /> Delete Selected ({selectedBatchIds.length})
+              </button>
+            </div>
+          )}
 
           {batches.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '48px 20px', color: '#64748b', background: '#f8fafc', borderRadius: '4px', border: '1px dashed #cbd5e1' }}>
@@ -683,6 +1328,15 @@ export default function Dashboard() {
               <table>
                 <thead>
                   <tr>
+                    <th style={{ width: '40px', textAlign: 'center' }}>
+                      <input
+                        type="checkbox"
+                        checked={batches.length > 0 && selectedBatchIds.length === batches.length}
+                        onChange={handleSelectAllBatches}
+                        title={selectedBatchIds.length === batches.length ? "Deselect all files" : "Select all files"}
+                        style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                      />
+                    </th>
                     <th>File Identifier</th>
                     <th>Status</th>
                     <th>Files</th>
@@ -694,84 +1348,174 @@ export default function Dashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {batches.map((batch) => (
-                    <tr key={batch.batch_id}>
-                      <td>
-                        <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: '#0f172a' }}>
-                          {batch.batch_id}
-                        </span>
-                      </td>
-                      <td>
-                        <StatusBadge status={batch.status} />
-                      </td>
-                      <td>
-                        <strong>{batch.total_files}</strong> file{batch.total_files !== 1 ? 's' : ''}
-                        {batch.duplicate_files > 0 && (
-                          <span style={{ fontSize: '0.75rem', color: '#b45309', fontWeight: 600, marginLeft: '6px' }}>
-                            ({batch.duplicate_files} dup)
+                  {batches.map((batch) => {
+                    const isSelected = selectedBatchIds.includes(batch.batch_id);
+                    return (
+                      <tr key={batch.batch_id} style={{ backgroundColor: isSelected ? '#eff6ff' : 'inherit' }}>
+                        <td style={{ textAlign: 'center' }}>
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => handleToggleSelectBatch(batch.batch_id)}
+                            style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                          />
+                        </td>
+                        <td>
+                          <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: '#0f172a' }}>
+                            {batch.batch_id}
                           </span>
-                        )}
-                      </td>
-                      <td style={{ fontWeight: 600 }}>
-                        {batch.total_records.toLocaleString()}
-                      </td>
-                      <td>
-                        <span style={{ color: '#15803d', fontWeight: 700 }}>{batch.valid_records.toLocaleString()}</span>
-                        <span style={{ color: '#94a3b8', margin: '0 4px' }}>/</span>
-                        <span style={{ color: batch.invalid_records > 0 ? '#b91c1c' : '#64748b', fontWeight: batch.invalid_records > 0 ? 700 : 400 }}>
-                          {batch.invalid_records.toLocaleString()}
-                        </span>
-                      </td>
-                      <td>
-                        {getDbPushBadge(batch)}
-                      </td>
-                      <td style={{ color: '#475569', fontSize: '0.8rem', whiteSpace: 'nowrap' }}>
-                        {new Date(batch.created_at).toLocaleString()}
-                      </td>
-                      <td style={{ textAlign: 'center' }}>
-                        <div style={{ display: 'inline-flex', gap: '5px', flexWrap: 'wrap', justifyContent: 'center' }}>
-                          <button
-                            onClick={() => { setSelectedBatch(batch.batch_id); setActiveView('records'); }}
-                            className="btn btn-secondary"
-                            style={{ padding: '4px 8px', fontSize: '0.75rem', borderColor: '#3b82f6', color: '#1d4ed8' }}
-                            title="Inspect parsed records for this batch"
-                          >
-                            <Table size={12} /> Records
-                          </button>
-                          <Link 
-                            to={`/logs?batch_id=${batch.batch_id}`} 
-                            className="btn btn-secondary"
-                            style={{ padding: '4px 8px', fontSize: '0.75rem' }}
-                            title="View batch audit logs"
-                          >
-                            <Terminal size={12} /> Logs
-                          </Link>
-                          <Link 
-                            to={`/batches/${batch.batch_id}/results`} 
-                            className="btn btn-primary"
-                            style={{ padding: '4px 8px', fontSize: '0.75rem' }}
-                            title="Verification & downloads"
-                          >
-                            Results <ArrowRight size={11} />
-                          </Link>
-                          <button
-                            onClick={() => promptDeleteBatch(batch.batch_id)}
-                            disabled={deletingId === batch.batch_id}
-                            className="btn btn-danger"
-                            style={{ padding: '4px 8px', fontSize: '0.75rem' }}
-                            title="Permanently delete batch and its database records"
-                          >
-                            <Trash2 size={12} /> Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td>
+                          <StatusBadge status={batch.status} />
+                        </td>
+                        <td>
+                          <strong>{batch.total_files}</strong> file{batch.total_files !== 1 ? 's' : ''}
+                          {batch.duplicate_files > 0 && (
+                            <span style={{ fontSize: '0.75rem', color: '#b45309', fontWeight: 600, marginLeft: '6px' }}>
+                              ({batch.duplicate_files} dup)
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ fontWeight: 600 }}>
+                          {batch.total_records.toLocaleString()}
+                        </td>
+                        <td>
+                          <span style={{ color: '#15803d', fontWeight: 700 }}>{batch.valid_records.toLocaleString()}</span>
+                          <span style={{ color: '#94a3b8', margin: '0 4px' }}>/</span>
+                          <span style={{ color: batch.invalid_records > 0 ? '#b91c1c' : '#64748b', fontWeight: batch.invalid_records > 0 ? 700 : 400 }}>
+                            {batch.invalid_records.toLocaleString()}
+                          </span>
+                        </td>
+                        <td>
+                          {getDbPushBadge(batch)}
+                        </td>
+                        <td style={{ color: '#475569', fontSize: '0.8rem', whiteSpace: 'nowrap' }}>
+                          {new Date(batch.created_at).toLocaleString()}
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          <div style={{ display: 'inline-flex', gap: '5px', flexWrap: 'wrap', justifyContent: 'center' }}>
+                            <button
+                              onClick={() => { setSelectedBatch(batch.batch_id); setActiveView('records'); setPage(1); }}
+                              className="btn btn-secondary"
+                              style={{ padding: '4px 8px', fontSize: '0.75rem', borderColor: '#3b82f6', color: '#1d4ed8' }}
+                              title="Inspect parsed records for this batch"
+                            >
+                              <Table size={12} /> Records
+                            </button>
+                            <button
+                              onClick={() => { setSelectedBatch(batch.batch_id); setActiveView('errors'); setPage(1); }}
+                              className="btn btn-secondary"
+                              style={{ padding: '4px 8px', fontSize: '0.75rem', borderColor: '#fca5a5', color: '#b91c1c' }}
+                              title="Inspect error logs for this batch"
+                            >
+                              <AlertTriangle size={12} /> Errors
+                            </button>
+                            <Link 
+                              to={`/logs?batch_id=${batch.batch_id}`} 
+                              className="btn btn-secondary"
+                              style={{ padding: '4px 8px', fontSize: '0.75rem' }}
+                              title="View batch audit logs"
+                            >
+                              <Terminal size={12} /> Logs
+                            </Link>
+                            <Link 
+                              to={`/batches/${batch.batch_id}/results`} 
+                              className="btn btn-primary"
+                              style={{ padding: '4px 8px', fontSize: '0.75rem' }}
+                              title="Verification & downloads"
+                            >
+                              Results <ArrowRight size={11} />
+                            </Link>
+                            <button
+                              onClick={() => promptDeleteBatch(batch.batch_id)}
+                              disabled={deletingId === batch.batch_id}
+                              className="btn btn-danger"
+                              style={{ padding: '4px 8px', fontSize: '0.75rem' }}
+                              title="Permanently delete batch and its database records"
+                            >
+                              <Trash2 size={12} /> Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           )}
         </div>
+      )}
+
+      {/* Raw Error Record Inspection Modal */}
+      {inspectedRecord && (
+        <Modal
+          isOpen={Boolean(inspectedRecord)}
+          onClose={() => setInspectedRecord(null)}
+          onConfirm={() => setInspectedRecord(null)}
+          title="Invalid APBS Record Diagnostic Inspection"
+          description={`Line #${inspectedRecord.line_no || 'N/A'} in ${inspectedRecord._source_file || inspectedRecord.batch_id || 'source file'}`}
+          confirmText="Close Inspector"
+          showCancel={false}
+          variant="secondary"
+          details={
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px', background: '#fff1f2', padding: '12px', borderRadius: '6px', border: '1px solid #fecdd3' }}>
+                <div><strong>Beneficiary:</strong> <span style={{ color: '#9f1239', fontWeight: 700 }}>{inspectedRecord.beneficiary_name || 'N/A'}</span></div>
+                <div><strong>Aadhaar Number:</strong> <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{inspectedRecord.beneficiary_aadhaar_number || 'N/A'}</span></div>
+                <div><strong>Credit Reference:</strong> <span style={{ fontFamily: 'var(--font-mono)' }}>{inspectedRecord.user_credit_reference || 'N/A'}</span></div>
+                <div><strong>Amount (Paise):</strong> {inspectedRecord.amount || '0'}</div>
+                <div><strong>Bank Account:</strong> <span style={{ fontFamily: 'var(--font-mono)' }}>{inspectedRecord.destination_bank_account_number || 'N/A'}</span></div>
+                <div><strong>Bank IIN:</strong> <span style={{ fontFamily: 'var(--font-mono)' }}>{inspectedRecord.destination_bank_iin || 'N/A'}</span></div>
+                <div><strong>File Source:</strong> {inspectedRecord._source_file || inspectedRecord.batch_id || 'N/A'}</div>
+                <div><strong>Line #:</strong> {inspectedRecord.line_no || 'N/A'}</div>
+              </div>
+
+              <div style={{ background: '#fef2f2', padding: '10px 14px', borderRadius: '4px', border: '1px solid #fecaca' }}>
+                <div style={{ color: '#b91c1c', fontWeight: 700, fontSize: '0.85rem', marginBottom: '2px' }}>
+                  Failure Root Cause: {inspectedRecord.error_type || inspectedRecord.reason_code || 'INVALID_RECORD'}
+                </div>
+                <div style={{ color: '#475569', fontSize: '0.825rem' }}>
+                  {inspectedRecord.error_detail || inspectedRecord.reason_code || 'Record violated APBS fixed-width parsing constraints.'}
+                </div>
+              </div>
+
+              {inspectedRecord.raw_line && (
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#334155' }}>
+                      Raw Fixed-Width Line Content ({inspectedRecord.raw_line.length} characters / Expected 177):
+                    </span>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(inspectedRecord.raw_line);
+                        showToast('Raw line copied to clipboard');
+                      }}
+                      className="btn btn-secondary"
+                      style={{ padding: '2px 8px', fontSize: '0.75rem' }}
+                    >
+                      Copy Raw String
+                    </button>
+                  </div>
+                  <pre style={{
+                    background: '#0f172a',
+                    color: '#38bdf8',
+                    padding: '12px',
+                    borderRadius: '4px',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: '0.75rem',
+                    overflowX: 'auto',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-all',
+                    maxHeight: '160px',
+                  }}>
+                    {inspectedRecord.raw_line}
+                  </pre>
+                </div>
+              )}
+            </div>
+          }
+        />
       )}
 
       {/* Custom Application Confirmation Modal */}

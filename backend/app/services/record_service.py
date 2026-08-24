@@ -39,6 +39,61 @@ CANONICAL_FIELD_NAMES = [
 ]
 
 
+def _parse_error_line(line: str, source_file: str = "", batch_id: str = "") -> Optional[Dict[str, Any]]:
+    stripped = line.strip()
+    if not stripped or "|" not in stripped:
+        return None
+
+    # ErrorWriter writes: LINE:<line_no>|ERROR:<error_type>|DETAIL:<detail>|RAW:<raw_line>
+    parts = stripped.split("|")
+    entry_data = {}
+    for part in parts:
+        if ":" in part:
+            k, v = part.split(":", 1)
+            entry_data[k.upper()] = v
+
+    raw = entry_data.get("RAW", "")
+    # Restore pipe character replacement if any
+    raw_restored = raw.replace("¦", "|")
+    line_no_str = entry_data.get("LINE", "")
+    error_type = entry_data.get("ERROR", "INVALID_RECORD")
+    detail = entry_data.get("DETAIL", "")
+
+    rec = {f_name: "" for f_name in CANONICAL_FIELD_NAMES}
+
+    if len(raw_restored) == settings.APBS_RECORD_LENGTH:
+        try:
+            from app.services.apbs_parser import parse_line
+            parsed = parse_line(raw_restored)
+            for f_name in CANONICAL_FIELD_NAMES:
+                rec[f_name] = getattr(parsed, f_name, "").strip()
+        except Exception:
+            pass
+        if not rec.get("beneficiary_name"):
+            rec["beneficiary_name"] = f"Beneficiary (Line {line_no_str})" if line_no_str else "Unidentified Beneficiary"
+        if not rec.get("user_credit_reference"):
+            rec["user_credit_reference"] = f"ERR_L{line_no_str}" if line_no_str else "ERR_UNKNOWN"
+    else:
+        # For non-177 length records, field column positions are misaligned / corrupt
+        rec["beneficiary_name"] = f"Unparsed Record ({len(raw_restored)} chars / expected 177)"
+        rec["beneficiary_aadhaar_number"] = "N/A (Length Violation)"
+        rec["user_credit_reference"] = f"ERR_L{line_no_str}" if line_no_str else "ERR_UNKNOWN"
+        rec["amount"] = "0"
+        rec["destination_bank_account_number"] = "N/A"
+        rec["destination_bank_iin"] = "N/A"
+
+    rec["id"] = f"err_{batch_id}_{line_no_str}_{rec.get('user_credit_reference', '')}"
+    rec["status"] = "Invalid"
+    rec["reason_code"] = error_type
+    rec["error_type"] = error_type
+    rec["error_detail"] = detail
+    rec["line_no"] = line_no_str
+    rec["raw_line"] = raw_restored
+    rec["_source_file"] = source_file
+    rec["batch_id"] = batch_id
+    return rec
+
+
 def _parse_output_line(line: str, source_file: str = "") -> Optional[Dict[str, Any]]:
     parts = line.rstrip("\r\n").split(settings.OUTPUT_DELIMITER)
     if len(parts) != len(FIELD_SCHEMA):
@@ -48,6 +103,25 @@ def _parse_output_line(line: str, source_file: str = "") -> Optional[Dict[str, A
         rec[f_def.name] = val
     rec["_source_file"] = source_file
     return rec
+
+
+_RECORDS_CACHE: Dict[str, Any] = {
+    "system_all": None,
+    "system_errors": None,
+    "batches": {},
+    "batch_errors": {},
+}
+
+
+def clear_records_cache():
+    """Clear in-memory cached record datasets when database or files are modified."""
+    global _RECORDS_CACHE
+    _RECORDS_CACHE = {
+        "system_all": None,
+        "system_errors": None,
+        "batches": {},
+        "batch_errors": {},
+    }
 
 
 def get_paginated_parsed_records(
@@ -60,118 +134,218 @@ def get_paginated_parsed_records(
     reason_code: Optional[str] = None,
     status_filter: Optional[str] = None,
     search: Optional[str] = None,
+    force_refresh: bool = False,
 ) -> Dict[str, Any]:
     """
     Retrieve server-side paginated and filtered parsed records across all batches or for a specific batch.
+    Uses in-memory cache to ensure database is queried only once per session/cycle.
     """
+    if force_refresh:
+        clear_records_cache()
+
     records: List[Dict[str, Any]] = []
     data_source = "Production Database & Staging Records"
+    b_id = (batch_id or "ALL").upper()
 
-    # If specific batch requested
-    if batch_id and batch_id.upper() != "ALL":
-        is_imported = (batch_status == BatchStatus.IMPORTED.value or batch_status == "IMPORTED")
-        if is_imported and db:
-            data_source = "Production Database (transactions table)"
-            tx_query = db.query(DBTransaction).filter(DBTransaction.batch_id == batch_id)
-            for tx in tx_query.all():
-                rec = {f_name: getattr(tx, f_name, "") for f_name in CANONICAL_FIELD_NAMES}
-                rec["id"] = str(tx.id)
-                rec["status"] = "Committed"
-                rec["batch_id"] = tx.batch_id
-                rec["_source_file"] = tx.file_id or ""
-                records.append(rec)
+    # Special Fast-Path: If querying exclusively Invalid / Error records
+    if status_filter and status_filter.upper() == "INVALID":
+        data_source = "Storage Error Logs"
+        err_records = []
 
-            dup_query = db.query(DBDuplicateLog).filter(DBDuplicateLog.attempted_batch_id == batch_id)
-            for dup in dup_query.all():
-                rec = {f_name: "" for f_name in CANONICAL_FIELD_NAMES}
-                rec["id"] = f"dup_{dup.id}"
-                rec["user_credit_reference"] = dup.record_hash[:13]
-                rec["status"] = "Duplicate"
-                rec["reason_code"] = "DUP"
-                rec["batch_id"] = dup.attempted_batch_id
-                rec["_source_file"] = dup.attempted_file_id or ""
-                records.append(rec)
+        if b_id == "ALL":
+            cached_err = _RECORDS_CACHE.get("system_errors")
+            if cached_err is not None:
+                err_records = cached_err
+            else:
+                err_base = os.path.join(str(settings.STORAGE_BASE_DIR), "errors")
+                if os.path.exists(err_base):
+                    for sub_dir in os.listdir(err_base):
+                        err_dir = os.path.join(err_base, sub_dir)
+                        if os.path.isdir(err_dir):
+                            for fname in sorted(os.listdir(err_dir)):
+                                if fname.endswith("_errors.txt"):
+                                    fpath = os.path.join(err_dir, fname)
+                                    with open(fpath, "r", encoding="utf-8") as f:
+                                        for line in f:
+                                            parsed_err = _parse_error_line(line, source_file=fname, batch_id=sub_dir)
+                                            if parsed_err:
+                                                err_records.append(parsed_err)
+                _RECORDS_CACHE["system_errors"] = err_records
         else:
-            data_source = "records_staging"
-            batch_paths = get_batch_paths(batch_id)
-            out_dir = str(batch_paths.output_dir)
-            if os.path.exists(out_dir):
-                for fname in sorted(os.listdir(out_dir)):
-                    if fname.endswith("_output.txt"):
-                        fpath = os.path.join(out_dir, fname)
-                        with open(fpath, "r", encoding="utf-8") as f:
-                            f.readline()  # skip header
-                            for line in f:
-                                parsed = _parse_output_line(line, source_file=fname)
-                                if parsed:
-                                    parsed["id"] = f"staging_{parsed.get('user_credit_reference', '')}"
-                                    parsed["status"] = "Pending Verification"
-                                    parsed["batch_id"] = batch_id
-                                    records.append(parsed)
+            cached_err = _RECORDS_CACHE.get("batch_errors", {}).get(batch_id)
+            if cached_err is not None:
+                err_records = cached_err
+            else:
+                batch_paths = get_batch_paths(batch_id)
+                err_dir = str(batch_paths.errors_dir)
+                if os.path.exists(err_dir):
+                    for fname in sorted(os.listdir(err_dir)):
+                        if fname.endswith("_errors.txt"):
+                            fpath = os.path.join(err_dir, fname)
+                            with open(fpath, "r", encoding="utf-8") as f:
+                                for line in f:
+                                    parsed_err = _parse_error_line(line, source_file=fname, batch_id=batch_id)
+                                    if parsed_err:
+                                        err_records.append(parsed_err)
+                _RECORDS_CACHE["batch_errors"][batch_id] = err_records
 
-            # Read any error records from error logs as "Invalid"
-            err_dir = str(batch_paths.errors_dir)
-            if os.path.exists(err_dir):
-                for fname in sorted(os.listdir(err_dir)):
-                    if fname.endswith("_errors.txt"):
-                        fpath = os.path.join(err_dir, fname)
-                        with open(fpath, "r", encoding="utf-8") as f:
-                            for line in f:
-                                stripped = line.strip()
-                                if stripped and "|" in stripped:
-                                    parts = stripped.split("|")
-                                    rec = {f_name: "" for f_name in CANONICAL_FIELD_NAMES}
-                                    if len(parts) >= 2:
-                                        rec["reason_code"] = parts[1][:2]
-                                    rec["id"] = f"err_{stripped[:10]}"
-                                    rec["status"] = "Invalid"
-                                    rec["user_name_narration"] = stripped[:40]
-                                    rec["_source_file"] = fname
-                                    rec["batch_id"] = batch_id
-                                    records.append(rec)
-    else:
-        # Fetch all records across system
-        if db:
-            tx_query = db.query(DBTransaction)
-            for tx in tx_query.all():
-                rec = {f_name: getattr(tx, f_name, "") for f_name in CANONICAL_FIELD_NAMES}
-                rec["id"] = str(tx.id)
-                rec["status"] = "Committed"
-                rec["batch_id"] = tx.batch_id
-                rec["_source_file"] = tx.file_id or ""
-                records.append(rec)
+        filtered = []
+        for r in err_records:
+            if reason_code and str(reason_code).strip() != "":
+                if str(reason_code).strip().lower() not in str(r.get("reason_code", "")).strip().lower() and \
+                   str(reason_code).strip().lower() not in str(r.get("error_type", "")).strip().lower():
+                    continue
+            if search and str(search).strip() != "":
+                s = str(search).lower().strip()
+                searchable_fields = [
+                    str(r.get("beneficiary_aadhaar_number", "")),
+                    str(r.get("beneficiary_name", "")),
+                    str(r.get("user_credit_reference", "")),
+                    str(r.get("destination_bank_account_number", "")),
+                    str(r.get("destination_bank_iin", "")),
+                    str(r.get("reason_code", "")),
+                    str(r.get("error_type", "")),
+                    str(r.get("error_detail", "")),
+                    str(r.get("_source_file", "")),
+                    str(r.get("batch_id", "")),
+                ]
+                if not any(s in f.lower() for f in searchable_fields):
+                    continue
+            filtered.append(r)
 
-            dup_query = db.query(DBDuplicateLog)
-            for dup in dup_query.all():
-                rec = {f_name: "" for f_name in CANONICAL_FIELD_NAMES}
-                rec["id"] = f"dup_{dup.id}"
-                rec["user_credit_reference"] = dup.record_hash[:13]
-                rec["status"] = "Duplicate"
-                rec["reason_code"] = "DUP"
-                rec["batch_id"] = dup.attempted_batch_id
-                rec["_source_file"] = dup.attempted_file_id or ""
-                records.append(rec)
+        total = len(filtered)
+        page_size = min(max(1, page_size), 1000)
+        total_pages = max(1, (total + page_size - 1) // page_size)
+        offset = (page - 1) * page_size
+        paged_slice = filtered[offset : offset + page_size]
+        return {
+            "batch_id": batch_id,
+            "data_source": data_source,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+            "columns": CANONICAL_FIELD_NAMES + ["status"],
+            "records": paged_slice,
+        }
 
-        # Also inspect staging directories for non-committed batches
-        input_base = os.path.join(str(settings.STORAGE_BASE_DIR), "output")
-        if os.path.exists(input_base):
-            for b_dir in os.listdir(input_base):
-                out_dir = os.path.join(input_base, b_dir)
-                if os.path.isdir(out_dir):
-                    has_db_tx = any(r.get("batch_id") == b_dir for r in records)
-                    if not has_db_tx:
-                        for fname in sorted(os.listdir(out_dir)):
-                            if fname.endswith("_output.txt"):
-                                fpath = os.path.join(out_dir, fname)
+    # If querying all batches or a single batch
+    if b_id == "ALL":
+        cached_recs = _RECORDS_CACHE.get("system_all")
+        if cached_recs is not None:
+            records = cached_recs
+        else:
+            if db:
+                tx_query = db.query(DBTransaction)
+                for tx in tx_query.all():
+                    rec = {f_name: getattr(tx, f_name, "") for f_name in CANONICAL_FIELD_NAMES}
+                    rec["id"] = str(tx.id)
+                    rec["status"] = "Committed"
+                    rec["batch_id"] = tx.batch_id
+                    rec["_source_file"] = tx.file_id or ""
+                    records.append(rec)
+
+                dup_query = db.query(DBDuplicateLog)
+                for dup in dup_query.all():
+                    rec = {f_name: "" for f_name in CANONICAL_FIELD_NAMES}
+                    rec["id"] = f"dup_{dup.id}"
+                    rec["user_credit_reference"] = dup.record_hash[:13]
+                    rec["status"] = "Duplicate"
+                    rec["reason_code"] = "DUP"
+                    rec["batch_id"] = dup.attempted_batch_id
+                    rec["_source_file"] = dup.attempted_file_id or ""
+                    records.append(rec)
+
+            input_base = os.path.join(str(settings.STORAGE_BASE_DIR), "output")
+            if os.path.exists(input_base):
+                for b_dir in os.listdir(input_base):
+                    out_dir = os.path.join(input_base, b_dir)
+                    if os.path.isdir(out_dir):
+                        has_db_tx = any(r.get("batch_id") == b_dir for r in records)
+                        if not has_db_tx:
+                            for fname in sorted(os.listdir(out_dir)):
+                                if fname.endswith("_output.txt"):
+                                    fpath = os.path.join(out_dir, fname)
+                                    with open(fpath, "r", encoding="utf-8") as f:
+                                        f.readline()
+                                        for line in f:
+                                            parsed = _parse_output_line(line, source_file=fname)
+                                            if parsed:
+                                                parsed["id"] = f"staging_{parsed.get('user_credit_reference', '')}"
+                                                parsed["status"] = "Pending Verification"
+                                                parsed["batch_id"] = b_dir
+                                                records.append(parsed)
+
+            err_base = os.path.join(str(settings.STORAGE_BASE_DIR), "errors")
+            if os.path.exists(err_base):
+                for b_dir in os.listdir(err_base):
+                    err_dir = os.path.join(err_base, b_dir)
+                    if os.path.isdir(err_dir):
+                        for fname in sorted(os.listdir(err_dir)):
+                            if fname.endswith("_errors.txt"):
+                                fpath = os.path.join(err_dir, fname)
                                 with open(fpath, "r", encoding="utf-8") as f:
-                                    f.readline()
                                     for line in f:
-                                        parsed = _parse_output_line(line, source_file=fname)
-                                        if parsed:
-                                            parsed["id"] = f"staging_{parsed.get('user_credit_reference', '')}"
-                                            parsed["status"] = "Pending Verification"
-                                            parsed["batch_id"] = b_dir
-                                            records.append(parsed)
+                                        parsed_err = _parse_error_line(line, source_file=fname, batch_id=b_dir)
+                                        if parsed_err:
+                                            records.append(parsed_err)
+            _RECORDS_CACHE["system_all"] = records
+    else:
+        cached_recs = _RECORDS_CACHE.get("batches", {}).get(batch_id)
+        if cached_recs is not None:
+            records = cached_recs
+        else:
+            is_imported = (batch_status == BatchStatus.IMPORTED.value or batch_status == "IMPORTED")
+            if is_imported and db:
+                data_source = "Production Database (transactions table)"
+                tx_query = db.query(DBTransaction).filter(DBTransaction.batch_id == batch_id)
+                for tx in tx_query.all():
+                    rec = {f_name: getattr(tx, f_name, "") for f_name in CANONICAL_FIELD_NAMES}
+                    rec["id"] = str(tx.id)
+                    rec["status"] = "Committed"
+                    rec["batch_id"] = tx.batch_id
+                    rec["_source_file"] = tx.file_id or ""
+                    records.append(rec)
+
+                dup_query = db.query(DBDuplicateLog).filter(DBDuplicateLog.attempted_batch_id == batch_id)
+                for dup in dup_query.all():
+                    rec = {f_name: "" for f_name in CANONICAL_FIELD_NAMES}
+                    rec["id"] = f"dup_{dup.id}"
+                    rec["user_credit_reference"] = dup.record_hash[:13]
+                    rec["status"] = "Duplicate"
+                    rec["reason_code"] = "DUP"
+                    rec["batch_id"] = dup.attempted_batch_id
+                    rec["_source_file"] = dup.attempted_file_id or ""
+                    records.append(rec)
+            else:
+                data_source = "records_staging"
+                batch_paths = get_batch_paths(batch_id)
+                out_dir = str(batch_paths.output_dir)
+                if os.path.exists(out_dir):
+                    for fname in sorted(os.listdir(out_dir)):
+                        if fname.endswith("_output.txt"):
+                            fpath = os.path.join(out_dir, fname)
+                            with open(fpath, "r", encoding="utf-8") as f:
+                                f.readline()
+                                for line in f:
+                                    parsed = _parse_output_line(line, source_file=fname)
+                                    if parsed:
+                                        parsed["id"] = f"staging_{parsed.get('user_credit_reference', '')}"
+                                        parsed["status"] = "Pending Verification"
+                                        parsed["batch_id"] = batch_id
+                                        records.append(parsed)
+
+                err_dir = str(batch_paths.errors_dir)
+                if os.path.exists(err_dir):
+                    for fname in sorted(os.listdir(err_dir)):
+                        if fname.endswith("_errors.txt"):
+                            fpath = os.path.join(err_dir, fname)
+                            with open(fpath, "r", encoding="utf-8") as f:
+                                for line in f:
+                                    parsed_err = _parse_error_line(line, source_file=fname, batch_id=batch_id)
+                                    if parsed_err:
+                                        records.append(parsed_err)
+            _RECORDS_CACHE["batches"][batch_id] = records
 
     # Apply dynamic in-memory filtering
     filtered = []
@@ -208,6 +382,9 @@ def get_paginated_parsed_records(
                 str(r.get("user_name_narration", "")),
                 str(r.get("destination_bank_account_number", "")),
                 str(r.get("destination_bank_iin", "")),
+                str(r.get("reason_code", "")),
+                str(r.get("error_type", "")),
+                str(r.get("error_detail", "")),
                 str(r.get("_source_file", "")),
                 str(r.get("batch_id", "")),
             ]
@@ -217,12 +394,12 @@ def get_paginated_parsed_records(
         filtered.append(r)
 
     total = len(filtered)
-    page_size = min(max(1, page_size), 100)
+    page_size = min(max(1, page_size), 1000)
     total_pages = max(1, (total + page_size - 1) // page_size)
     offset = (page - 1) * page_size
     paged_slice = filtered[offset : offset + page_size]
 
-    # Return unmasked records in exact canonical order
+    # Return unmasked records in exact canonical order with error diagnostics
     result_items = []
     for r in paged_slice:
         item = {k: r.get(k, "") for k in CANONICAL_FIELD_NAMES}
@@ -230,6 +407,10 @@ def get_paginated_parsed_records(
         item["status"] = r.get("status", "Pending Verification")
         item["_source_file"] = r.get("_source_file", "")
         item["batch_id"] = r.get("batch_id", "")
+        item["error_type"] = r.get("error_type", "")
+        item["error_detail"] = r.get("error_detail", "")
+        item["line_no"] = r.get("line_no", "")
+        item["raw_line"] = r.get("raw_line", "")
         result_items.append(item)
 
     return {
@@ -305,6 +486,8 @@ def delete_single_record(
                                 f.writelines(kept_lines)
                     except Exception as e:
                         print(f"[STAGING DELETE] Warning: {e}")
+
+    clear_records_cache()
 
     return {
         "success": True,
