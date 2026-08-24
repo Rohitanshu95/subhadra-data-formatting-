@@ -68,3 +68,4 @@ celerybeat.pid
 *.swp
 *.swo
 .DS_Store
+storage/

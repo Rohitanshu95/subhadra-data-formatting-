@@ -299,7 +299,7 @@ class BatchManager:
         batch = BatchMetadata(batch_id=batch_id)
         self._batches[batch_id] = batch
         self._sync_batch_to_db(batch)
-        record_log("BATCH", f"Batch initialized with unique identifier {batch_id}", batch_id=batch_id)
+        record_log("RECORD", f"Batch initialized with unique identifier {batch_id}", batch_id=batch_id)
         return batch
 
     # ── File upload ─────────────────────────────────────────────
@@ -346,19 +346,24 @@ class BatchManager:
         )
 
         dup_info = self._dedup.check_duplicate(upload_result.sha256)
+        # If duplicate points to a batch that no longer exists (e.g. was deleted), discard orphan entry
+        if dup_info is not None and dup_info.original_batch_id not in self._batches:
+            self._dedup.unregister_file(upload_result.sha256)
+            dup_info = None
+
         if dup_info is not None:
             file_meta.mark_duplicate(
                 original_batch=dup_info.original_batch_id,
                 original_file=dup_info.original_filename,
             )
-            record_log("FILE", f"Duplicate file detected: {filename} (matches batch {dup_info.original_batch_id})", batch_id=batch_id, file_id=file_meta.sanitized_filename)
+            record_log("INDIVIDUAL DATA", f"Duplicate file detected: {filename} (matches batch {dup_info.original_batch_id})", batch_id=batch_id, file_id=file_meta.sanitized_filename)
         else:
             self._dedup.register_file(
                 sha256=upload_result.sha256,
                 batch_id=batch_id,
                 filename=upload_result.sanitized_filename,
             )
-            record_log("FILE", f"Uploaded file {filename} ({file_meta.size:,} bytes) SHA-256: {file_meta.sha256[:16]}...", batch_id=batch_id, file_id=file_meta.sanitized_filename)
+            record_log("INDIVIDUAL DATA", f"Uploaded file {filename} ({file_meta.size:,} bytes) SHA-256: {file_meta.sha256[:16]}...", batch_id=batch_id, file_id=file_meta.sanitized_filename)
 
         batch.add_file(file_meta)
         batch.status = BatchStatus.UPLOADING
@@ -383,7 +388,7 @@ class BatchManager:
         batch.mark_processing()
         batch_paths = get_batch_paths(batch_id)
         validator = StreamingValidator()
-        record_log("BATCH", f"Started processing {len(ready_files)} file(s) for batch {batch_id}", batch_id=batch_id)
+        record_log("RECORD", f"Started processing {len(ready_files)} file(s) for batch {batch_id}", batch_id=batch_id)
 
         for file_meta in ready_files:
             file_meta.mark_processing()
@@ -410,7 +415,7 @@ class BatchManager:
                     output_path=output_path,
                     error_path=error_path,
                 )
-                record_log("FILE", f"Processed {file_meta.sanitized_filename}: {result.valid_records:,} valid, {result.invalid_records:,} invalid", batch_id=batch_id, file_id=file_meta.sanitized_filename)
+                record_log("INDIVIDUAL DATA", f"Processed {file_meta.sanitized_filename}: {result.valid_records:,} valid, {result.invalid_records:,} invalid", batch_id=batch_id, file_id=file_meta.sanitized_filename)
             except Exception as e:
                 print(f"[PROCESS ERROR] Failed on {file_meta.sanitized_filename}: {e}")
                 file_meta.mark_failed()
@@ -418,7 +423,7 @@ class BatchManager:
 
         batch.mark_completed()
         self._sync_batch_to_db(batch)
-        record_log("BATCH", f"Batch {batch_id} processing completed. Status: {batch.status.value}, Total Valid: {batch.valid_records:,}, Invalid: {batch.invalid_records:,}", batch_id=batch_id)
+        record_log("RECORD", f"Batch {batch_id} processing completed. Status: {batch.status.value}, Total Valid: {batch.valid_records:,}, Invalid: {batch.invalid_records:,}", batch_id=batch_id)
         return batch
 
     # ── Batch retrieval ─────────────────────────────────────────
@@ -474,11 +479,14 @@ class BatchManager:
                 except Exception as e:
                     print(f"[STORAGE DELETE] Warning: Could not remove directory {p}: {e}")
 
-        # 3. Remove from in-memory dictionary
+        # 3. Unregister file SHA-256 hashes from deduplication registry
+        self._dedup.unregister_batch(batch_id)
+
+        # 4. Remove from in-memory dictionary
         if batch_id in self._batches:
             del self._batches[batch_id]
 
-        print(f"\n[API] [DELETE] Batch {batch_id} successfully deleted from Database & Storage.")
+        print(f"\n[API] [DELETE] Batch {batch_id} successfully deleted from Database, Deduplication Registry & Storage.")
         return {
             "success": True,
             "batch_id": batch_id,

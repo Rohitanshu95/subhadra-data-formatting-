@@ -134,13 +134,13 @@ export default function BatchResults() {
   const promptDeleteBatch = () => {
     setModalConfig({
       isOpen: true,
-      title: 'Delete Batch Confirmation',
-      description: `Are you sure you want to permanently delete Batch "${batchId}"? This will remove all associated files, audit logs, and SQL database transactions.`,
-      confirmText: 'Delete Entire Batch',
+      title: 'Delete File Confirmation',
+      description: `Are you sure you want to permanently delete File "${batchId}"? This will remove all associated files, audit logs, and SQL database transactions.`,
+      confirmText: 'Delete File Entry',
       variant: 'danger',
       details: (
         <div style={{ color: '#b91c1c' }}>
-          ⚠️ All transactions from this batch in the database will be erased.
+          ⚠️ All transactions from this file in the database will be erased.
         </div>
       ),
       onConfirm: async () => {
@@ -150,7 +150,7 @@ export default function BatchResults() {
           closeModal();
           navigate('/');
         } catch (err) {
-          showToast(`Failed to delete batch: ${err.response?.data?.detail || err.message}`, 'error');
+          showToast(`Failed to delete file: ${err.response?.data?.detail || err.message}`, 'error');
           setActionLoading(false);
         }
       }
@@ -185,9 +185,9 @@ export default function BatchResults() {
             disabled={actionLoading}
             className="btn btn-danger"
             style={{ padding: '8px 14px' }}
-            title="Permanently delete batch and its database records"
+            title="Permanently delete file and its database records"
           >
-            <Trash2 size={15} /> Delete Batch
+            <Trash2 size={15} /> Delete File
           </button>
         </div>
       </div>

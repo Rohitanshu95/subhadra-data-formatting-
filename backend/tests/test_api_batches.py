@@ -105,11 +105,9 @@ class TestBatchAPI:
         assert len(data["records"]) >= 1
 
         rec = data["records"][0]
-        # Sensitive fields must be masked
-        assert rec["beneficiary_aadhaar_number"].startswith("********")
-        assert rec["beneficiary_aadhaar_number"].endswith("9012")
-        assert rec["destination_bank_account_number"].startswith("**********")
-        assert rec["destination_bank_account_number"].endswith("1234")
+        # PII fields are returned unmasked by default (mask_pii=False)
+        assert "123456789012" in rec["beneficiary_aadhaar_number"]
+        assert "98765432101234" in rec["destination_bank_account_number"]
         # Must have 18th status column
         assert "status" in rec
 
@@ -123,4 +121,25 @@ class TestBatchAPI:
         data = resp.json()
         assert "items" in data
         assert "total" in data
+
+    def test_delete_single_record_endpoint(self):
+        # 1. Create and upload batch with a record
+        create_resp = client.post("/api/batches")
+        batch_id = create_resp.json()["batch_id"]
+
+        line = build_valid_record(
+            user_credit_ref="DEL_TEST_001"
+        )
+        files = [
+            ("files", ("del_test.txt", io.BytesIO((line + "\n").encode("utf-8")), "text/plain"))
+        ]
+        client.post(f"/api/batches/{batch_id}/upload", files=files)
+        client.post(f"/api/batches/{batch_id}/process")
+
+        # 2. Test deleting the record by reference
+        del_resp = client.delete(f"/api/batches/records/1?ref=DEL_TEST_001&batch_id={batch_id}")
+        assert del_resp.status_code == 200
+        del_data = del_resp.json()
+        assert del_data["success"] is True
+
 

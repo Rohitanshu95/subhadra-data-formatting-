@@ -278,7 +278,7 @@ export default function Dashboard() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px', flexWrap: 'wrap', gap: '14px' }}>
         <div>
           <h1 style={{ fontSize: '1.75rem', color: '#0f172a', marginBottom: '4px' }}>
-            APBS Batch Processing Dashboard
+            APBS Processing Dashboard
           </h1>
           <p style={{ color: '#64748b', fontSize: '0.9rem' }}>
             Aadhaar Payment Bridge System — 177-Character Fixed-Width Validation & DB Lifecycle Pipeline
@@ -295,7 +295,7 @@ export default function Dashboard() {
           </button>
           <Link to="/batches/new" className="btn btn-primary">
             <PlusCircle size={15} />
-            Upload New Batch
+            Upload New File
           </Link>
         </div>
       </div>
@@ -381,7 +381,7 @@ export default function Dashboard() {
             }}
           >
             <Layers size={15} />
-            Registered Batches ({batches.length})
+            Registered Files ({batches.length})
           </button>
         </div>
 
@@ -402,14 +402,14 @@ export default function Dashboard() {
               {/* Batch Filter Dropdown */}
               <div>
                 <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
-                  Filter by Batch
+                  Filter by File
                 </label>
                 <select
                   value={selectedBatch}
                   onChange={(e) => { setSelectedBatch(e.target.value); setPage(1); }}
                   style={{ width: '100%', padding: '8px 10px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.875rem', backgroundColor: '#ffffff' }}
                 >
-                  <option value="ALL">All Registered Batches</option>
+                  <option value="ALL">All Registered Files</option>
                   {batches.map((b) => (
                     <option key={b.batch_id} value={b.batch_id}>
                       {b.batch_id} ({b.status})
@@ -654,16 +654,16 @@ export default function Dashboard() {
         </>
       )}
 
-      {/* VIEW 2: REGISTERED BATCHES TABLE */}
+      {/* VIEW 2: REGISTERED FILES TABLE */}
       {activeView === 'batches' && (
         <div className="gov-card" style={{ padding: '20px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
             <h2 style={{ fontSize: '1.15rem', display: 'flex', alignItems: 'center', gap: '8px', color: '#0f172a' }}>
               <FileText size={18} color="#1d4ed8" />
-              Registered Batches ({batches.length})
+              Registered Files ({batches.length})
             </h2>
             <span style={{ fontSize: '0.8rem', color: '#64748b', fontWeight: 600 }}>
-              Showing all active & SQL-synchronized batches
+              Showing all active & SQL-synchronized files
             </span>
           </div>
 
@@ -672,10 +672,10 @@ export default function Dashboard() {
               <div style={{ width: '44px', height: '44px', borderRadius: '50%', background: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}>
                 <Layers size={22} color="#64748b" />
               </div>
-              <p style={{ fontWeight: 700, color: '#1e293b', marginBottom: '4px' }}>No processing batches found</p>
+              <p style={{ fontWeight: 700, color: '#1e293b', marginBottom: '4px' }}>No processing files found</p>
               <p style={{ fontSize: '0.85rem', marginBottom: '16px' }}>Upload your first APBS fixed-width response file to start parsing.</p>
               <Link to="/batches/new" className="btn btn-primary">
-                <PlusCircle size={15} /> Upload First Batch
+                <PlusCircle size={15} /> Upload First File
               </Link>
             </div>
           ) : (
@@ -683,7 +683,7 @@ export default function Dashboard() {
               <table>
                 <thead>
                   <tr>
-                    <th>Batch Identifier</th>
+                    <th>File Identifier</th>
                     <th>Status</th>
                     <th>Files</th>
                     <th>Total Records</th>

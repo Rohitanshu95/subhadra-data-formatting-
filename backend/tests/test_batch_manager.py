@@ -15,7 +15,7 @@ class TestBatchManager:
     def test_create_batch_and_add_files(self):
         manager = BatchManager()
         batch = manager.create_batch()
-        assert batch.batch_id.startswith("BATCH-")
+        assert batch.batch_id.startswith("FILE-")
         assert batch.status == BatchStatus.CREATED
         assert batch.total_files == 0
 

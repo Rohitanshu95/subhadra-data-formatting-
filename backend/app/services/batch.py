@@ -48,7 +48,7 @@ class BatchIdGenerator:
         # 4-char hex suffix from UUID for extra uniqueness
         hex_suffix = uuid.uuid4().hex[:4].upper()
 
-        return f"BATCH-{date_str}-{count:03d}-{hex_suffix}"
+        return f"FILE-{date_str}-{count:03d}-{hex_suffix}"
 
 
 # Module-level singleton

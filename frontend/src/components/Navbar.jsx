@@ -96,7 +96,7 @@ export default function Navbar() {
               style={{ padding: '8px 16px', fontSize: '0.875rem', background: '#2563eb', border: '1px solid #3b82f6' }}
             >
               <PlusCircle size={16} />
-              Upload Batch
+              Upload File
             </Link>
           </nav>
         </div>

@@ -6,7 +6,7 @@ Includes real-time terminal output and error logging.
 from __future__ import annotations
 
 import os
-from typing import Dict, List
+from typing import Dict, List, Optional
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel, Field
@@ -230,7 +230,18 @@ async def process_batch(batch_id: str, background_tasks: BackgroundTasks):
         batch = default_batch_manager.get_batch(batch_id)
         ready_files = [f for f in batch.files.values() if f.status == FileStatus.READY]
         if not ready_files:
-            raise HTTPException(status_code=400, detail="No files in READY state to process")
+            if batch.total_files > 0:
+                # All files in the batch are duplicate files or already processed
+                batch.mark_completed()
+                default_batch_manager._sync_batch_to_db(batch)
+                try:
+                    from app.services.summary import generate_batch_summary
+                    generate_batch_summary(batch)
+                except Exception as sum_err:
+                    print(f"[API] [WARN] Summary generation notice: {sum_err}")
+                print(f"[API] [PROCESS] Batch {batch_id} consists entirely of duplicate files ({batch.duplicate_files} dup). Marked completed.")
+                return batch
+            raise HTTPException(status_code=400, detail="No files uploaded in batch to process")
 
         print(f"\n[API] [PROCESS] Triggering batch processing for {batch_id} ({len(ready_files)} ready files)...")
         

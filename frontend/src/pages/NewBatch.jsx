@@ -85,7 +85,7 @@ export default function NewBatch() {
       setError(null);
       
       // 1. Create Batch
-      setUploadProgressText('Step 1/3: Allocating buffered batch queue...');
+      setUploadProgressText('Step 1/3: Allocating buffered processing queue...');
       const batch = await createBatch();
       const batchId = batch.batch_id;
 
@@ -101,7 +101,7 @@ export default function NewBatch() {
       navigate(`/batches/${batchId}`);
     } catch (err) {
       console.error(err);
-      setError(err.response?.data?.detail || err.message || 'Failed to start batch processing.');
+      setError(err.response?.data?.detail || err.message || 'Failed to start file processing.');
       setUploading(false);
     }
   };
@@ -111,7 +111,7 @@ export default function NewBatch() {
       {/* Header section */}
       <div style={{ marginBottom: '22px' }}>
         <h1 style={{ fontSize: '1.75rem', color: '#0f172a', marginBottom: '4px' }}>
-          Upload APBS Response Batch
+          Upload APBS Response File
         </h1>
         <p style={{ color: '#64748b', fontSize: '0.9rem' }}>
           Upload APBS 177-character fixed-width response files for automated parsing, deduplication, and database verification.
@@ -298,7 +298,7 @@ export default function NewBatch() {
             disabled={files.length === 0 || uploading}
             style={{ padding: '10px 28px', fontSize: '0.95rem' }}
           >
-            {uploading ? 'Processing Batch...' : `Start Batch Processing (${files.length} file${files.length !== 1 ? 's' : ''})`}
+            {uploading ? 'Processing File(s)...' : `Start File Processing (${files.length} file${files.length !== 1 ? 's' : ''})`}
             <ArrowRight size={16} />
           </button>
         </div>

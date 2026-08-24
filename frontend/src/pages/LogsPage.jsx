@@ -110,11 +110,11 @@ export default function LogsPage() {
     if (l === 'ERROR' || l === 'CRITICAL' || l === 'FAILED') {
       return <span style={{ background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca', padding: '2px 8px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 700 }}>ERROR</span>;
     }
-    if (l === 'BATCH') {
-      return <span style={{ background: '#faf5ff', color: '#7e22ce', border: '1px solid #e9d5ff', padding: '2px 8px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 700 }}>BATCH</span>;
+    if (l === 'RECORD' || l === 'BATCH') {
+      return <span style={{ background: '#faf5ff', color: '#7e22ce', border: '1px solid #e9d5ff', padding: '2px 8px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 700 }}>RECORD</span>;
     }
-    if (l === 'FILE') {
-      return <span style={{ background: '#f0fdfa', color: '#0f766e', border: '1px solid #99f6e4', padding: '2px 8px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 700 }}>FILE</span>;
+    if (l === 'INDIVIDUAL DATA' || l === 'FILE') {
+      return <span style={{ background: '#f0fdfa', color: '#0f766e', border: '1px solid #99f6e4', padding: '2px 8px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 700 }}>INDIVIDUAL DATA</span>;
     }
     if (l === 'APPLICATION') {
       return <span style={{ background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '2px 8px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 700 }}>APPLICATION</span>;
@@ -137,7 +137,7 @@ export default function LogsPage() {
             System & Audit Logs
           </h1>
           <p style={{ color: '#64748b', fontSize: '0.875rem' }}>
-            Four-tier structured operational logs (Application, Batch, File, and Error events)
+            Structured operational logs (Application, Record, Individual Data, and Error events)
           </p>
         </div>
 
@@ -186,8 +186,8 @@ export default function LogsPage() {
             >
               <option value="ALL">All Tiers & Levels</option>
               <option value="APPLICATION">Application Tier</option>
-              <option value="BATCH">Batch Tier</option>
-              <option value="FILE">File Tier</option>
+              <option value="RECORD">Record Tier</option>
+              <option value="INDIVIDUAL DATA">Individual Data Tier</option>
               <option value="ERROR">Error Events</option>
               <option value="INFO">Info</option>
             </select>
@@ -196,11 +196,11 @@ export default function LogsPage() {
           {/* Batch ID Filter */}
           <div>
             <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
-              Batch Identifier
+              File Identifier
             </label>
             <input
               type="text"
-              placeholder="e.g. BATCH-20260820-..."
+              placeholder="e.g. FILE-20260820-..."
               value={batchId}
               onChange={(e) => setBatchId(e.target.value)}
               list="batches-list"
@@ -304,8 +304,8 @@ export default function LogsPage() {
               <thead>
                 <tr>
                   <th style={{ width: '180px' }}>Timestamp</th>
-                  <th style={{ width: '100px' }}>Tier / Level</th>
-                  <th style={{ width: '190px' }}>Batch Identifier</th>
+                  <th style={{ width: '130px' }}>Tier / Level</th>
+                  <th style={{ width: '190px' }}>File Identifier</th>
                   <th style={{ width: '140px' }}>File Context</th>
                   <th>Log Message</th>
                   <th style={{ width: '60px', textAlign: 'center' }}>Copy</th>

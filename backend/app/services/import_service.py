@@ -150,7 +150,7 @@ class ImportService:
         print(f"  * Colliding Duplicates Diverted : {total_duplicates:,} (saved in duplicates_log)")
         print("=" * 85 + "\n")
 
-        record_log("BATCH", f"Batch {batch_id} committed to SQL: {total_imported:,} new transactions inserted, {total_duplicates:,} duplicates recorded", batch_id=batch_id)
+        record_log("RECORD", f"Batch {batch_id} committed to SQL: {total_imported:,} new transactions inserted, {total_duplicates:,} duplicates recorded", batch_id=batch_id)
 
         return ImportResult(
             batch_id=batch_id,

@@ -84,6 +84,21 @@ class FileDeduplicationService:
         with self._lock:
             return len(self._registry)
 
+    def unregister_batch(self, batch_id: str) -> None:
+        """Remove all files registered under a specific batch ID."""
+        with self._lock:
+            to_remove = [
+                sha for sha, info in self._registry.items()
+                if info.original_batch_id == batch_id
+            ]
+            for sha in to_remove:
+                del self._registry[sha]
+
+    def unregister_file(self, sha256: str) -> None:
+        """Remove a specific file hash from the registry."""
+        with self._lock:
+            self._registry.pop(sha256, None)
+
     def clear(self) -> None:
         """Clear the registry (mainly for testing)."""
         with self._lock:

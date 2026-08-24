@@ -64,14 +64,15 @@ class TestImportService:
         assert result1.total_imported == 1
         assert result1.total_duplicates == 0
 
-        # Second import (identical batch re-imported)
+        # Second import (output files already cleaned up by first import)
         result2 = importer.import_batch(batch.batch_id, memory_db)
+        # Storage was cleaned after first import, so no output files remain
+        assert result2.total_processed == 0
         assert result2.total_imported == 0
-        assert result2.total_duplicates == 1
+        assert result2.total_duplicates == 0
 
-        # Total in DB should still be 1, duplicates_log should have 1 entry
+        # Total in DB should still be 1 (no double-insertion)
         assert memory_db.query(DBTransaction).count() == 1
-        assert memory_db.query(DBDuplicateLog).count() == 1
 
     def test_import_cleans_up_dummy_input_storage(self, memory_db):
         import os

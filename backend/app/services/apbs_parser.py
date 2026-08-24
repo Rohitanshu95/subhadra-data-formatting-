@@ -45,7 +45,7 @@ class FieldDefinition:
 
 FIELD_SCHEMA: tuple[FieldDefinition, ...] = (
     FieldDefinition(1,  "apbs_transaction_code",       0,   2,  FIELD_TYPE_NUM,    True),
-    FieldDefinition(2,  "destination_bank_iin",         2,   9,  FIELD_TYPE_NUM,    True),
+    FieldDefinition(2,  "destination_bank_iin",         2,   9,  FIELD_TYPE_ALPNUM, True),
     FieldDefinition(3,  "destination_account_type",     11,  2,  FIELD_TYPE_NUM,    False),
     FieldDefinition(4,  "ledger_folio_number",          13,  3,  FIELD_TYPE_ALPNUM, False),
     FieldDefinition(5,  "beneficiary_aadhaar_number",   16,  15, FIELD_TYPE_NUM,    True),
