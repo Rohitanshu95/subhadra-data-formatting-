@@ -9,7 +9,7 @@ from typing import Dict, List, Optional
 from app.core.config import settings
 from app.services.apbs_parser import FIELD_SCHEMA
 from app.services.storage import get_batch_paths
-from app.utils.masking import mask_record_dict
+from app.utils.masking import mask_record_dict, mask_aadhaar, mask_account_number
 
 
 def get_clean_records_preview(batch_id: str, limit: int = 20, mask_pii: bool = True) -> List[Dict[str, str]]:
@@ -54,10 +54,10 @@ def get_clean_records_preview(batch_id: str, limit: int = 20, mask_pii: bool = T
     return records
 
 
-def get_error_records_preview(batch_id: str, limit: int = 20) -> List[Dict[str, str]]:
+def get_error_records_preview(batch_id: str, limit: int = 20, mask_pii: bool = True) -> List[Dict[str, str]]:
     """
     Read up to `limit` error log rows from the batch errors directory.
-    Includes user identification (Beneficiary name, Aadhaar, Credit Ref).
+    PII fields (Aadhaar, account number) are masked by default for privacy.
     """
     batch_paths = get_batch_paths(batch_id)
     errors_dir = str(batch_paths.errors_dir)
@@ -92,14 +92,29 @@ def get_error_records_preview(batch_id: str, limit: int = 20) -> List[Dict[str, 
                         entry["beneficiary_aadhaar_number"] = parsed.beneficiary_aadhaar_number.strip()
                         entry["user_credit_reference"] = parsed.user_credit_reference.strip()
                         entry["amount"] = parsed.amount.strip()
+                        
+                        # Mask PII fields before returning
+                        if mask_pii:
+                            entry["beneficiary_aadhaar_number"] = mask_aadhaar(entry["beneficiary_aadhaar_number"])
+                            entry["beneficiary_name"] = "[MASKED]"
+                            # Don't mask user_credit_reference as it's not strictly PII
+                            
                     except Exception:
                         pass
                 elif len(raw) >= 31:
                     raw_restored = raw.replace("¦", "|")
-                    entry["beneficiary_aadhaar_number"] = raw_restored[16:31].strip() if len(raw_restored) >= 31 else ""
-                    entry["beneficiary_name"] = raw_restored[31:71].strip() if len(raw_restored) >= 71 else ""
+                    aadhaar = raw_restored[16:31].strip() if len(raw_restored) >= 31 else ""
+                    name = raw_restored[31:71].strip() if len(raw_restored) >= 71 else ""
+                    
+                    entry["beneficiary_aadhaar_number"] = aadhaar
+                    entry["beneficiary_name"] = name
                     entry["user_credit_reference"] = raw_restored[107:120].strip() if len(raw_restored) >= 120 else ""
                     entry["amount"] = raw_restored[120:133].strip() if len(raw_restored) >= 133 else ""
+                    
+                    # Mask PII fields
+                    if mask_pii:
+                        entry["beneficiary_aadhaar_number"] = mask_aadhaar(aadhaar)
+                        entry["beneficiary_name"] = "[MASKED]"
 
                 errors.append(entry)
                 if len(errors) >= limit:

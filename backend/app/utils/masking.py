@@ -75,3 +75,53 @@ def mask_log_message(message: str) -> str:
         lambda m: "*" * (len(m.group(0)) - 4) + m.group(0)[-4:],
         message
     )
+
+
+def mask_apbs_record(raw_line: str) -> str:
+    """
+    Mask PII fields in a 177-character APBS record.
+
+    PII Fields masked:
+    - beneficiary_aadhaar_number (chars 16-31)
+    - beneficiary_name (chars 31-71)
+    - destination_bank_account_number (chars 157-177)
+
+    Args:
+        raw_line: The 177-character raw APBS record
+
+    Returns:
+        The same record with PII fields masked
+    """
+    if len(raw_line) < 177:
+        # For incomplete records, just mask any digit patterns
+        return mask_log_message(raw_line)
+
+    # Convert to list for easier manipulation
+    chars = list(raw_line)
+
+    # Mask beneficiary_aadhaar_number (offset 16, width 15)
+    # Extract, mask, and replace
+    aadhaar_start, aadhaar_end = 16, 31
+    aadhaar = ''.join(chars[aadhaar_start:aadhaar_end])
+    masked_aadhaar = mask_aadhaar(aadhaar)
+    for i, c in enumerate(masked_aadhaar):
+        if i < len(chars) - aadhaar_start:
+            chars[aadhaar_start + i] = c
+
+    # Mask beneficiary_name (offset 31, width 40)
+    # Replace with placeholder to protect full name
+    name_start, name_end = 31, 71
+    masked_name = "[BENEFICIARY_NAME_MASKED]".ljust(name_end - name_start)[:name_end - name_start]
+    for i, c in enumerate(masked_name):
+        if i < len(chars) - name_start:
+            chars[name_start + i] = c
+
+    # Mask destination_bank_account_number (offset 157, width 20)
+    account_start, account_end = 157, 177
+    account = ''.join(chars[account_start:account_end])
+    masked_account = mask_account_number(account)
+    for i, c in enumerate(masked_account):
+        if i < len(chars) - account_start:
+            chars[account_start + i] = c
+
+    return ''.join(chars)

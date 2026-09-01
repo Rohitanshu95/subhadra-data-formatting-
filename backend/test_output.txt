@@ -1,0 +1,138 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.3, pytest-9.0.2, pluggy-1.6.0 -- C:\Python314\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\rohitanshu.dhar\Desktop\projects\data-separator-\backend
+plugins: anyio-4.13.0, langsmith-0.7.25, asyncio-1.3.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 108 items
+
+tests/test_apbs_parser.py::TestSchemaDefinition::test_total_width_is_177 PASSED [  0%]
+tests/test_apbs_parser.py::TestSchemaDefinition::test_field_count_is_17 PASSED [  1%]
+tests/test_apbs_parser.py::TestSchemaDefinition::test_offsets_are_contiguous PASSED [  2%]
+tests/test_apbs_parser.py::TestSchemaDefinition::test_first_field_starts_at_zero PASSED [  3%]
+tests/test_apbs_parser.py::TestSchemaDefinition::test_field_indices_are_sequential PASSED [  4%]
+tests/test_apbs_parser.py::TestNonCreditDetection::test_header_trailer_line_detected PASSED [  5%]
+tests/test_apbs_parser.py::TestNonCreditDetection::test_credit_line_not_detected PASSED [  6%]
+tests/test_apbs_parser.py::TestNonCreditDetection::test_return_transaction_not_detected PASSED [  7%]
+tests/test_apbs_parser.py::TestNonCreditDetection::test_empty_line PASSED [  8%]
+tests/test_apbs_parser.py::TestNonCreditDetection::test_single_char_line PASSED [  9%]
+tests/test_apbs_parser.py::TestParseLine::test_parse_valid_record_extracts_all_fields PASSED [ 10%]
+tests/test_apbs_parser.py::TestParseLine::test_transaction_code_extracted PASSED [ 11%]
+tests/test_apbs_parser.py::TestParseLine::test_aadhaar_extracted PASSED  [ 12%]
+tests/test_apbs_parser.py::TestParseLine::test_beneficiary_name_extracted PASSED [ 12%]
+tests/test_apbs_parser.py::TestParseLine::test_amount_property PASSED    [ 13%]
+tests/test_apbs_parser.py::TestParseLine::test_success_flag_property PASSED [ 14%]
+tests/test_apbs_parser.py::TestParseLine::test_all_fields_have_correct_width PASSED [ 15%]
+tests/test_apbs_parser.py::TestValidateFields::test_valid_record_has_no_errors PASSED [ 16%]
+tests/test_apbs_parser.py::TestValidateFields::test_empty_required_field_detected PASSED [ 17%]
+tests/test_apbs_parser.py::TestValidateFields::test_invalid_numeric_field_detected PASSED [ 18%]
+tests/test_apbs_parser.py::TestValidateFields::test_returned_transaction_code_88_is_valid PASSED [ 19%]
+tests/test_apbs_parser.py::TestValidateFields::test_optional_empty_fields_pass_validation PASSED [ 20%]
+tests/test_api_batches.py::TestBatchAPI::test_health_check PASSED        [ 21%]
+tests/test_api_batches.py::TestBatchAPI::test_create_and_get_batch PASSED [ 22%]
+tests/test_api_batches.py::TestBatchAPI::test_upload_files_and_process_batch_flow PASSED [ 23%]
+tests/test_api_batches.py::TestBatchAPI::test_overview_stats_pipeline_stages PASSED [ 24%]
+tests/test_api_batches.py::TestBatchAPI::test_get_batch_parsed_records_and_masking PASSED [ 25%]
+tests/test_api_batches.py::TestBatchAPI::test_logs_endpoint_filtering PASSED [ 25%]
+tests/test_api_batches.py::TestBatchAPI::test_delete_single_record_endpoint PASSED [ 26%]
+tests/test_batch_manager.py::TestBatchManager::test_create_batch_and_add_files PASSED [ 27%]
+tests/test_batch_manager.py::TestBatchManager::test_duplicate_file_detection_in_batch PASSED [ 28%]
+tests/test_batch_manager.py::TestBatchManager::test_process_batch_executes_streaming_validation PASSED [ 29%]
+tests/test_batch_manager.py::TestBatchManager::test_non_existent_batch_raises_error PASSED [ 30%]
+tests/test_db_models.py::TestDBModels::test_create_batch_and_file_relationship PASSED [ 31%]
+tests/test_db_models.py::TestDBModels::test_unique_record_hash_constraint PASSED [ 32%]
+tests/test_download_service.py::TestDownloadService::test_get_paths_and_create_zip_archive PASSED [ 33%]
+tests/test_duplicate.py::TestFileDeduplicationService::test_register_and_detect_duplicate PASSED [ 34%]
+tests/test_duplicate.py::TestFileDeduplicationService::test_different_hashes_not_duplicates PASSED [ 35%]
+tests/test_hash.py::TestStreamingHasher::test_streaming_hasher_matches_standard_hashlib PASSED [ 36%]
+tests/test_hash.py::TestStreamingHasher::test_hasher_copy PASSED         [ 37%]
+tests/test_hash.py::TestStreamingHasher::test_compute_file_hash PASSED   [ 37%]
+tests/test_import_service.py::TestImportService::test_import_clean_batch PASSED [ 38%]
+tests/test_import_service.py::TestImportService::test_reimporting_same_batch_is_idempotent PASSED [ 39%]
+tests/test_import_service.py::TestImportService::test_import_cleans_up_dummy_input_storage PASSED [ 40%]
+tests/test_masking.py::TestPIIMasking::test_mask_aadhaar_15_digits PASSED [ 41%]
+tests/test_masking.py::TestPIIMasking::test_mask_aadhaar_12_digits PASSED [ 42%]
+tests/test_masking.py::TestPIIMasking::test_mask_account_number PASSED   [ 43%]
+tests/test_masking.py::TestPIIMasking::test_mask_record_dict PASSED      [ 44%]
+tests/test_masking.py::TestPIIMasking::test_mask_log_message PASSED      [ 45%]
+tests/test_output.py::TestOutputWriter::test_creates_output_file_with_header PASSED [ 46%]
+tests/test_output.py::TestOutputWriter::test_writes_records_in_pipe_delimited_format PASSED [ 47%]
+tests/test_output.py::TestOutputWriter::test_records_written_count PASSED [ 48%]
+tests/test_output.py::TestOutputWriter::test_custom_delimiter PASSED     [ 49%]
+tests/test_output.py::TestErrorWriter::test_creates_error_file PASSED    [ 50%]
+tests/test_output.py::TestErrorWriter::test_error_format PASSED          [ 50%]
+tests/test_output.py::TestErrorWriter::test_write_validation_errors PASSED [ 51%]
+tests/test_output.py::TestErrorWriter::test_pipes_in_raw_line_are_sanitized PASSED [ 52%]
+tests/test_output.py::TestErrorWriter::test_output_writer_buffering_and_flush PASSED [ 53%]
+tests/test_output.py::TestErrorWriter::test_error_writer_buffering_and_flush PASSED [ 54%]
+tests/test_preview.py::TestPreviewService::test_get_clean_records_preview PASSED [ 55%]
+tests/test_preview.py::TestPreviewService::test_get_error_records_preview PASSED [ 56%]
+tests/test_preview.py::TestPreviewService::test_get_summary_content PASSED [ 57%]
+tests/test_record_hash.py::TestRecordHash::test_compute_record_hash_deterministic PASSED [ 58%]
+tests/test_record_hash.py::TestRecordHash::test_different_records_produce_different_hashes PASSED [ 59%]
+tests/test_record_separator.py::TestRecordSeparatorContinuousStream::test_continuous_stream_three_records PASSED [ 60%]
+tests/test_record_separator.py::TestRecordSeparatorContinuousStream::test_continuous_stream_character_boundary PASSED [ 61%]
+tests/test_record_separator.py::TestRecordSeparatorContinuousStream::test_continuous_stream_partial_record_at_eof PASSED [ 62%]
+tests/test_record_separator.py::TestRecordSeparatorContinuousStream::test_continuous_stream_multiple_data_records PASSED [ 62%]
+tests/test_record_separator.py::TestRecordSeparatorNewlineDelimited::test_newline_delimited_three_records PASSED [ 63%]
+tests/test_record_separator.py::TestRecordSeparatorNewlineDelimited::test_newline_delimited_with_crlf PASSED [ 64%]
+tests/test_record_separator.py::TestRecordSeparatorEmptyFile::test_empty_file PASSED [ 65%]
+tests/test_record_separator.py::TestFileFormatDetection::test_detect_continuous_stream PASSED [ 66%]
+tests/test_record_separator.py::TestFileFormatDetection::test_detect_newline_delimited PASSED [ 67%]
+tests/test_record_separator.py::TestStreamingValidatorWithContinuousStream::test_continuous_stream_heading_skipped PASSED [ 68%]
+tests/test_record_separator.py::TestStreamingValidatorWithContinuousStream::test_continuous_stream_with_invalid_records PASSED [ 69%]
+tests/test_record_separator.py::TestStreamingValidatorWithContinuousStream::test_continuous_stream_preserves_legacy_support PASSED [ 70%]
+tests/test_record_separator.py::TestHeadingDetection::test_heading_record_is_first_record PASSED [ 71%]
+tests/test_record_separator.py::TestHeadingDetection::test_data_record_is_not_heading PASSED [ 72%]
+tests/test_record_separator.py::TestHeadingDetection::test_transaction_code_33_is_non_credit PASSED [ 73%]
+tests/test_record_separator.py::TestHeadingDetection::test_transaction_code_77_is_credit PASSED [ 74%]
+tests/test_record_separator.py::TestRegressionAllExistingTests::test_all_valid_records_legacy PASSED [ 75%]
+tests/test_record_separator.py::TestRegressionAllExistingTests::test_mixed_valid_invalid_legacy PASSED [ 75%]
+tests/test_record_separator.py::TestRegressionAllExistingTests::test_non_credit_lines_skipped_legacy PASSED [ 76%]
+tests/test_retention.py::TestRetentionService::test_cleanup_expired_raw_inputs PASSED [ 77%]
+tests/test_security_auth.py::TestSecurityAuth::test_jwt_create_and_verify PASSED [ 78%]
+tests/test_security_auth.py::TestSecurityAuth::test_jwt_expired_token PASSED [ 79%]
+tests/test_security_auth.py::TestSecurityAuth::test_login_api_endpoint PASSED [ 80%]
+tests/test_security_auth.py::TestSecurityAuth::test_protected_me_endpoint PASSED [ 81%]
+tests/test_summary.py::TestBatchSummary::test_generate_batch_summary PASSED [ 82%]
+tests/test_upload.py::TestFilenameValidationAndSanitization::test_valid_filename PASSED [ 83%]
+tests/test_upload.py::TestFilenameValidationAndSanitization::test_path_traversal_rejected PASSED [ 84%]
+tests/test_upload.py::TestFilenameValidationAndSanitization::test_absolute_path_unix_rejected PASSED [ 85%]
+tests/test_upload.py::TestFilenameValidationAndSanitization::test_absolute_path_windows_rejected PASSED [ 86%]
+tests/test_upload.py::TestFilenameValidationAndSanitization::test_null_byte_rejected PASSED [ 87%]
+tests/test_upload.py::TestFilenameValidationAndSanitization::test_empty_filename_rejected PASSED [ 87%]
+tests/test_upload.py::TestFilenameValidationAndSanitization::test_sanitize_removes_path_and_special_chars PASSED [ 88%]
+tests/test_upload.py::TestUploadService::test_save_uploaded_file PASSED  [ 89%]
+tests/test_validation.py::TestStreamingValidatorValidFile::test_all_valid_records PASSED [ 90%]
+tests/test_validation.py::TestStreamingValidatorValidFile::test_output_file_created_with_header PASSED [ 91%]
+tests/test_validation.py::TestStreamingValidatorMixedFile::test_mixed_records PASSED [ 92%]
+tests/test_validation.py::TestStreamingValidatorMixedFile::test_error_file_has_entries PASSED [ 93%]
+tests/test_validation.py::TestStreamingValidatorLengthCheck::test_short_record_rejected PASSED [ 94%]
+tests/test_validation.py::TestStreamingValidatorLengthCheck::test_long_record_rejected PASSED [ 95%]
+tests/test_validation.py::TestStreamingValidatorNonCreditSkip::test_non_credit_lines_skipped PASSED [ 96%]
+tests/test_validation.py::TestStreamingValidatorEmptyFile::test_empty_file PASSED [ 97%]
+tests/test_validation.py::TestStreamingValidatorResilience::test_bad_record_does_not_stop_processing PASSED [ 98%]
+tests/test_verification_api.py::TestVerificationAndImportFlow::test_end_to_end_verification_and_import_api PASSED [ 99%]
+tests/test_worker.py::TestCeleryWorkerTasks::test_process_batch_task_eager PASSED [100%]
+
+============================== warnings summary ===============================
+app\main.py:44
+  C:\Users\rohitanshu.dhar\Desktop\projects\data-separator-\backend\app\main.py:44: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @app.on_event("startup")
+
+..\..\..\..\AppData\Roaming\Python\Python314\site-packages\fastapi\applications.py:4656
+  C:\Users\rohitanshu.dhar\AppData\Roaming\Python\Python314\site-packages\fastapi\applications.py:4656: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    return self.router.on_event(event_type)  # ty: ignore[deprecated]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================= 108 passed, 2 warnings in 6.60s =======================

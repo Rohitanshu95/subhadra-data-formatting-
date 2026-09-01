@@ -15,7 +15,7 @@ from app.models.batch import BatchStatus
 from app.models.db_models import DBBatch, DBDuplicateLog, DBFile, DBTransaction
 from app.services.apbs_parser import FIELD_SCHEMA
 from app.services.storage import get_batch_paths
-from app.utils.masking import mask_record_dict
+from app.utils.masking import mask_record_dict, mask_aadhaar, mask_account_number, mask_apbs_record
 
 
 CANONICAL_FIELD_NAMES = [
@@ -39,7 +39,7 @@ CANONICAL_FIELD_NAMES = [
 ]
 
 
-def _parse_error_line(line: str, source_file: str = "", batch_id: str = "") -> Optional[Dict[str, Any]]:
+def _parse_error_line(line: str, source_file: str = "", batch_id: str = "", mask_pii: bool = True) -> Optional[Dict[str, Any]]:
     stripped = line.strip()
     if not stripped or "|" not in stripped:
         return None
@@ -88,9 +88,18 @@ def _parse_error_line(line: str, source_file: str = "", batch_id: str = "") -> O
     rec["error_type"] = error_type
     rec["error_detail"] = detail
     rec["line_no"] = line_no_str
-    rec["raw_line"] = raw_restored
+    rec["raw_line"] = mask_apbs_record(raw_restored) if mask_pii else raw_restored
     rec["_source_file"] = source_file
     rec["batch_id"] = batch_id
+    
+    # Mask PII fields if requested
+    if mask_pii:
+        rec["beneficiary_aadhaar_number"] = mask_aadhaar(rec["beneficiary_aadhaar_number"])
+        rec["destination_bank_account_number"] = mask_account_number(rec["destination_bank_account_number"])
+        # Mask beneficiary_name with placeholder
+        if rec["beneficiary_name"] and not rec["beneficiary_name"].startswith("N/A") and not rec["beneficiary_name"].startswith("Unparsed"):
+            rec["beneficiary_name"] = "[BENEFICIARY_NAME_MASKED]"
+    
     return rec
 
 

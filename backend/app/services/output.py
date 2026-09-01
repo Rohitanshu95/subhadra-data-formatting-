@@ -19,6 +19,7 @@ from app.services.apbs_parser import (
     ParsedRecord,
     ValidationError,
 )
+from app.utils.masking import mask_apbs_record
 
 
 class OutputWriter:
@@ -136,8 +137,12 @@ class ErrorWriter:
         """Format an error entry and buffer it for writing."""
         if self._file is None:
             raise RuntimeError("ErrorWriter is not open")
-        # Sanitize raw_line: replace pipes and newlines to avoid format corruption
-        sanitized = raw_line.replace("|", "¦").replace("\n", "").replace("\r", "")
+        
+        # Mask PII from raw_line before storing to error file
+        masked_line = mask_apbs_record(raw_line)
+        
+        # Sanitize masked_line: replace pipes and newlines to avoid format corruption
+        sanitized = masked_line.replace("|", "¦").replace("\n", "").replace("\r", "")
         entry = f"LINE:{line_no}|ERROR:{error_type}|DETAIL:{detail}|RAW:{sanitized}\n"
         self._buffer.append(entry)
         self._count += 1

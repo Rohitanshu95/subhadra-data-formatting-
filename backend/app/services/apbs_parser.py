@@ -87,6 +87,34 @@ def is_non_credit_line(line: str) -> bool:
     return transaction_code in settings.NON_CREDIT_TRANSACTION_CODES
 
 
+def is_heading_or_header_line(line: str, record_number: int = 1) -> bool:
+    """
+    Identify if a record is a heading/header row that should be skipped.
+
+    In the 177-character fixed-width format with no newlines:
+    - Record 1 (characters 1-177) is the heading row and must be skipped.
+    - It typically has transaction code '33' or contains non-numeric data
+      in numeric fields (e.g., field labels instead of values).
+
+    Args:
+        line: The record string (should be 177 characters).
+        record_number: The 1-based record number (default 1 = heading row).
+
+    Returns:
+        True if this record is a heading row and should be skipped.
+    """
+    # Record 1 is always the heading row in fixed-width continuous format
+    if record_number == 1:
+        return True
+
+    # Also check for transaction code '33' as secondary confirmation
+    if len(line) >= 2:
+        transaction_code = line[:2].strip()
+        return transaction_code in settings.NON_CREDIT_TRANSACTION_CODES
+
+    return False
+
+
 # ── Line parser ─────────────────────────────────────────────────────
 
 @dataclass
@@ -203,7 +231,9 @@ def validate_fields(record: ParsedRecord) -> list[ValidationError]:
                     ))
             elif field_def.field_type == FIELD_TYPE_ALPNUM:
                 # Allow alphanumeric + spaces + common punctuation in names
-                if not all(c.isalnum() or c in (" ", ".", "-", "/", "_") for c in stripped):
+                # Common characters in Indian names: W/O (Wife Of), D/O (Daughter Of), S/O (Son Of)
+                # Also allow: comma, apostrophe, parentheses, colon for common name patterns
+                if not all(c.isalnum() or c in (" ", ".", "-", "/", "_", ",", "'", "(", ")", ":") for c in stripped):
                     errors.append(ValidationError(
                         field_name=field_def.name,
                         field_index=field_def.index,
