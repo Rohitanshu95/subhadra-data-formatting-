@@ -155,12 +155,18 @@ class TestValidateFields:
         assert len(aadhaar_errors) == 1
 
     def test_invalid_numeric_field_detected(self):
+        """In strict mode, invalid numeric fields are detected. In lenient mode (default), they pass."""
         line = build_record_with_invalid_numeric()
         record = parse_line(line)
-        errors = validate_fields(record)
-
-        assert len(errors) >= 1
-        error_types = [e.error_type for e in errors]
+        
+        # In lenient mode (default), invalid numeric should NOT generate errors
+        errors_lenient = validate_fields(record, strict_mode=False)
+        assert errors_lenient == [], "Lenient mode should accept all field content"
+        
+        # In strict mode, invalid numeric should generate errors
+        errors_strict = validate_fields(record, strict_mode=True)
+        assert len(errors_strict) >= 1
+        error_types = [e.error_type for e in errors_strict]
         assert "INVALID_NUMERIC" in error_types
 
     def test_returned_transaction_code_88_is_valid(self):

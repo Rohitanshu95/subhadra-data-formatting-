@@ -123,19 +123,18 @@ class StreamingValidator:
                     continue
 
                 # ── Length validation ───────────────────────────
+                # In lenient mode, we still need 177 chars for proper field parsing
+                # But we'll pad short records or truncate long ones
                 if len(line) != self._record_length:
-                    result.invalid_length_lines += 1
-                    result.invalid_records += 1
-                    err_msg = f"Length error: expected {self._record_length} chars, got {len(line)}"
-                    error_writer.write_error(
-                        line_no=record_number,
-                        error_type="INVALID_RECORD_LENGTH",
-                        detail=err_msg,
-                        raw_line=line,
-                    )
-                    if result.invalid_records <= 5:
-                        print(f"[PARSER] [ERROR] Record {record_number:04d}: [INVALID_RECORD_LENGTH] {err_msg}")
-                    continue
+                    if len(line) < self._record_length:
+                        # Pad short records with spaces
+                        padded_line = line + (" " * (self._record_length - len(line)))
+                        print(f"[PARSER] [INFO]  Record {record_number:04d}: Length {len(line)} chars, padded to {self._record_length}")
+                        line = padded_line
+                    else:
+                        # Truncate long records to 177 chars
+                        print(f"[PARSER] [INFO]  Record {record_number:04d}: Length {len(line)} chars, truncated to {self._record_length}")
+                        line = line[:self._record_length]
 
                 # ── Non-credit line detection (for legacy newline-delimited files) ───────────────────
                 if is_non_credit_line(line):
@@ -145,19 +144,25 @@ class StreamingValidator:
                 # ── Parse the 17 fields ─────────────────────────
                 parsed = parse_line(line)
 
-                # ── Validate fields ─────────────────────────────
-                errors = validate_fields(parsed)
+                # ── Validate fields (lenient mode: strict_mode=False) ────────────
+                # In lenient mode, we accept all data as-is and don't reject records
+                # Only required fields are checked; all other characters are allowed
+                errors = validate_fields(parsed, strict_mode=False)
 
                 if errors:
+                    # In lenient mode, validation errors are logged but records are STILL WRITTEN to output
                     result.invalid_records += 1
-                    error_writer.write_validation_errors(record_number, errors, line)
+                    # Log warning but don't write to error file
                     if result.invalid_records <= 5:
                         err_summary = ", ".join([f"{e.field_name}: {e.detail}" for e in errors])
-                        print(f"[PARSER] [WARN]  Record {record_number:04d}: Validation Error(s) -> {err_summary}")
+                        print(f"[PARSER] [WARN]  Record {record_number:04d}: Validation Warning(s) -> {err_summary}")
                     for err in errors:
                         result.error_details.append(
                             f"Record {record_number}: [{err.error_type}] {err.detail}"
                         )
+                    # IMPORTANT: Write to output anyway (lenient processing)
+                    result.valid_records += 1
+                    output_writer.write_record(parsed)
                 else:
                     result.valid_records += 1
                     output_writer.write_record(parsed)
@@ -169,10 +174,10 @@ class StreamingValidator:
         print("-" * 85)
         print(f"[STREAM PARSER] [DONE] Finished File: {filename}")
         print(f"  * Total Lines Read    : {result.total_lines:,}")
-        print(f"  * Valid Clean Records : {result.valid_records:,} (written to clean output)")
-        print(f"  * Invalid Error Lines : {result.invalid_records:,} (logged to errors file)")
+        print(f"  * Records to Output   : {result.valid_records:,} (all valid & lenient-validated records)")
+        print(f"  * Validation Warnings : {result.invalid_records:,} (logged but written to output)")
         print(f"  * Skipped Headers/Etc : {result.skipped_lines:,}")
-        print(f"  * File Clean Rate     : {result.success_rate:.2f}%")
+        print(f"  * Processing Mode     : LENIENT (accept all data as-is, no records rejected)")
         print("=" * 85 + "\n")
 
         return result

@@ -188,15 +188,24 @@ class ValidationError:
     raw_value: str
 
 
-def validate_fields(record: ParsedRecord) -> list[ValidationError]:
+def validate_fields(record: ParsedRecord, strict_mode: bool = False) -> list[ValidationError]:
     """
     Validate every field in a ParsedRecord against the schema.
 
-    Checks:
-    - Required fields must not be blank/whitespace-only.
-    - NUM fields must contain only digits (after stripping).
-    - ALPNUM fields must contain only alphanumeric chars + spaces
-      (after stripping).
+    Checks (depends on strict_mode):
+    - Required fields must not be blank/whitespace-only (always checked).
+    - NUM fields must contain only digits (checked in strict_mode=True only).
+    - ALPNUM fields must contain only valid chars (checked in strict_mode=True only).
+
+    In lenient mode (strict_mode=False):
+    - Only checks that required fields are non-empty
+    - Allows any character in ALPNUM fields (for names with special chars)
+    - Allows any character in NUM fields (will be passed as-is to output)
+
+    Args:
+        record: The ParsedRecord to validate
+        strict_mode: If True, enforce strict type validation. If False (default), 
+                     be lenient and allow any characters in fields.
 
     Returns:
         A list of ValidationError objects. Empty list = record is valid.
@@ -208,6 +217,7 @@ def validate_fields(record: ParsedRecord) -> list[ValidationError]:
         stripped = raw_value.strip()
 
         # ── Required check ──────────────────────────────────────
+        # Always check required fields, even in lenient mode
         if field_def.required and not stripped:
             errors.append(ValidationError(
                 field_name=field_def.name,
@@ -218,8 +228,8 @@ def validate_fields(record: ParsedRecord) -> list[ValidationError]:
             ))
             continue  # skip type check if empty
 
-        # ── Type check (only if non-empty) ──────────────────────
-        if stripped:
+        # ── Type check (only if non-empty and strict_mode=True) ─────
+        if strict_mode and stripped:
             if field_def.field_type == FIELD_TYPE_NUM:
                 if not stripped.isdigit():
                     errors.append(ValidationError(
@@ -241,5 +251,7 @@ def validate_fields(record: ParsedRecord) -> list[ValidationError]:
                         detail=f"Field '{field_def.name}' (#{field_def.index}) contains invalid characters: '{stripped}'",
                         raw_value=raw_value,
                     ))
+        # In lenient mode (strict_mode=False), skip all type checking
+        # All characters are accepted as-is
 
     return errors

@@ -157,47 +157,46 @@ def get_paginated_parsed_records(
     b_id = (batch_id or "ALL").upper()
 
     # Special Fast-Path: If querying exclusively Invalid / Error records
+    # IMPORTANT: When status_filter == "INVALID", ONLY return error log records, never database records
     if status_filter and status_filter.upper() == "INVALID":
-        data_source = "Storage Error Logs"
+        data_source = "Storage Error Logs Only"
         err_records = []
-
+        
+        # Always read fresh error records when filtering by INVALID (don't use cache for INVALID queries)
         if b_id == "ALL":
-            cached_err = _RECORDS_CACHE.get("system_errors")
-            if cached_err is not None:
-                err_records = cached_err
-            else:
-                err_base = os.path.join(str(settings.STORAGE_BASE_DIR), "errors")
-                if os.path.exists(err_base):
-                    for sub_dir in os.listdir(err_base):
-                        err_dir = os.path.join(err_base, sub_dir)
-                        if os.path.isdir(err_dir):
-                            for fname in sorted(os.listdir(err_dir)):
-                                if fname.endswith("_errors.txt"):
-                                    fpath = os.path.join(err_dir, fname)
+            err_base = os.path.join(str(settings.STORAGE_BASE_DIR), "errors")
+            if os.path.exists(err_base):
+                for sub_dir in os.listdir(err_base):
+                    err_dir = os.path.join(err_base, sub_dir)
+                    if os.path.isdir(err_dir):
+                        for fname in sorted(os.listdir(err_dir)):
+                            if fname.endswith("_errors.txt"):
+                                fpath = os.path.join(err_dir, fname)
+                                try:
                                     with open(fpath, "r", encoding="utf-8") as f:
                                         for line in f:
                                             parsed_err = _parse_error_line(line, source_file=fname, batch_id=sub_dir)
                                             if parsed_err:
                                                 err_records.append(parsed_err)
-                _RECORDS_CACHE["system_errors"] = err_records
+                                except Exception as e:
+                                    print(f"[ERROR] Failed to read error file {fpath}: {e}")
         else:
-            cached_err = _RECORDS_CACHE.get("batch_errors", {}).get(batch_id)
-            if cached_err is not None:
-                err_records = cached_err
-            else:
-                batch_paths = get_batch_paths(batch_id)
-                err_dir = str(batch_paths.errors_dir)
-                if os.path.exists(err_dir):
-                    for fname in sorted(os.listdir(err_dir)):
-                        if fname.endswith("_errors.txt"):
-                            fpath = os.path.join(err_dir, fname)
+            batch_paths = get_batch_paths(batch_id)
+            err_dir = str(batch_paths.errors_dir)
+            if os.path.exists(err_dir):
+                for fname in sorted(os.listdir(err_dir)):
+                    if fname.endswith("_errors.txt"):
+                        fpath = os.path.join(err_dir, fname)
+                        try:
                             with open(fpath, "r", encoding="utf-8") as f:
                                 for line in f:
                                     parsed_err = _parse_error_line(line, source_file=fname, batch_id=batch_id)
                                     if parsed_err:
                                         err_records.append(parsed_err)
-                _RECORDS_CACHE["batch_errors"][batch_id] = err_records
+                        except Exception as e:
+                            print(f"[ERROR] Failed to read error file {fpath}: {e}")
 
+        # Apply filters to error records
         filtered = []
         for r in err_records:
             if reason_code and str(reason_code).strip() != "":
@@ -227,6 +226,8 @@ def get_paginated_parsed_records(
         total_pages = max(1, (total + page_size - 1) // page_size)
         offset = (page - 1) * page_size
         paged_slice = filtered[offset : offset + page_size]
+        
+        print(f"[DEBUG] get_paginated_parsed_records INVALID path: found {total} error records in storage")
         return {
             "batch_id": batch_id,
             "data_source": data_source,
