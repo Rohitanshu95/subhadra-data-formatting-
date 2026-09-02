@@ -26,9 +26,10 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
-  ChevronsRight
+  ChevronsRight,
+  Download
 } from 'lucide-react';
-import { listBatches, getOverviewStats, getParsedRecords, deleteBatch, deleteRecord } from '../services/api';
+import { listBatches, getOverviewStats, getParsedRecords, deleteBatch, deleteRecord, downloadRecordsAsCSV, downloadRecordsAsText } from '../services/api';
 import MetricCard from '../components/MetricCard';
 import StatusBadge from '../components/StatusBadge';
 import Modal from '../components/Modal';
@@ -209,6 +210,38 @@ export default function Dashboard() {
     setSearchQuery('');
     setDebouncedSearch('');
     setPage(1);
+  };
+
+  const handleDownloadRecords = async (format) => {
+    try {
+      setRecordsLoading(true);
+      
+      // Build params from current filters
+      const params = { page: 1, page_size: 1000000 };
+      
+      if (selectedBatch && selectedBatch !== 'ALL') {
+        params.batch_id = selectedBatch;
+      }
+      if (successFlag !== '') params.success_flag = successFlag;
+      if (reasonCode.trim() !== '') params.reason_code = reasonCode.trim();
+      if (statusFilter !== 'ALL') params.status = statusFilter;
+      if (debouncedSearch.trim() !== '') params.search = debouncedSearch.trim();
+
+      const batchTarget = selectedBatch && selectedBatch !== 'ALL' ? selectedBatch : 'all';
+      
+      if (format === 'csv') {
+        await downloadRecordsAsCSV(batchTarget, params);
+        showToast(`Downloaded ${totalRecords} records as CSV`);
+      } else if (format === 'text') {
+        await downloadRecordsAsText(batchTarget, params);
+        showToast(`Downloaded ${totalRecords} records as Text`);
+      }
+    } catch (err) {
+      console.error(`Failed to download ${format}:`, err);
+      showToast(`Failed to download records as ${format.toUpperCase()}`, 'error');
+    } finally {
+      setRecordsLoading(false);
+    }
   };
 
   const [modalConfig, setModalConfig] = useState({
@@ -889,7 +922,53 @@ export default function Dashboard() {
                 </span>
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', color: '#64748b' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '0.85rem', color: '#64748b', flexWrap: 'wrap' }}>
+                {/* Download Options */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <button
+                    onClick={() => handleDownloadRecords('csv')}
+                    disabled={totalRecords === 0 || recordsLoading}
+                    className="btn btn-secondary"
+                    style={{ 
+                      padding: '6px 12px', 
+                      fontSize: '0.8rem',
+                      backgroundColor: '#fef3c7',
+                      borderColor: '#f59e0b',
+                      color: '#92400e',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}
+                    title="Download all records as CSV"
+                  >
+                    <Download size={14} />
+                    CSV
+                  </button>
+                  <button
+                    onClick={() => handleDownloadRecords('text')}
+                    disabled={totalRecords === 0 || recordsLoading}
+                    className="btn btn-secondary"
+                    style={{ 
+                      padding: '6px 12px', 
+                      fontSize: '0.8rem',
+                      backgroundColor: '#dbeafe',
+                      borderColor: '#3b82f6',
+                      color: '#1e40af',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}
+                    title="Download all records as pipe-delimited text"
+                  >
+                    <Download size={14} />
+                    Text
+                  </button>
+                </div>
+
+                {/* Divider */}
+                <div style={{ width: '1px', height: '24px', backgroundColor: '#cbd5e1' }} />
+
+                {/* Pagination and Page Size */}
                 <span>Page {page} of {totalPages} ({totalRecords.toLocaleString()} total)</span>
                 <select
                   value={pageSize}
@@ -941,8 +1020,6 @@ export default function Dashboard() {
                       <th style={{ whiteSpace: 'nowrap' }}>FILLER (15)</th>
                       <th style={{ whiteSpace: 'nowrap' }}>REASON (16)</th>
                       <th style={{ whiteSpace: 'nowrap' }}>DEST ACCOUNT NO (17)</th>
-                      <th style={{ whiteSpace: 'nowrap', textAlign: 'center' }}>STATUS (18)</th>
-                      <th style={{ whiteSpace: 'nowrap' }}>SOURCE FILE</th>
                       <th style={{ whiteSpace: 'nowrap', textAlign: 'center' }}>ACTION</th>
                     </tr>
                   </thead>
@@ -990,12 +1067,6 @@ export default function Dashboard() {
                           </td>
                           <td style={{ fontFamily: 'var(--font-mono)', color: '#334155' }}>
                             {r.destination_bank_account_number || '—'}
-                          </td>
-                          <td style={{ textAlign: 'center' }}>
-                            {getRecordStatusBadge(r.status)}
-                          </td>
-                          <td style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                            {r._source_file || r.batch_id || '—'}
                           </td>
                           <td style={{ textAlign: 'center' }}>
                             <div style={{ display: 'inline-flex', gap: '4px' }}>

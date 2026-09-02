@@ -90,6 +90,70 @@ export const getParsedRecords = async (batchId, params = {}) => {
   return res.data;
 };
 
+export const downloadRecordsAsCSV = async (batchId, params = {}) => {
+  /**
+   * Download all parsed records (as shown in dashboard) in CSV format
+   * Returns a file download in the browser
+   * 
+   * Optional params:
+   * - success_flag: Filter by success flag
+   * - reason_code: Filter by reason code
+   * - status: Filter by status (COMMITTED, INVALID, etc.)
+   * - search: Full-text search
+   */
+  try {
+    const response = await api.get(`/batches/${batchId}/download/records/csv`, { 
+      params,
+      responseType: 'blob'
+    });
+    
+    // Trigger download
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `${batchId}_records.csv`);
+    document.body.appendChild(link);
+    link.click();
+    link.parentNode.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  } catch (error) {
+    console.error('Failed to download CSV:', error);
+    throw error;
+  }
+};
+
+export const downloadRecordsAsText = async (batchId, params = {}) => {
+  /**
+   * Download all parsed records (as shown in dashboard) in pipe-delimited text format
+   * Returns a file download in the browser
+   * 
+   * Optional params:
+   * - success_flag: Filter by success flag
+   * - reason_code: Filter by reason code
+   * - status: Filter by status (COMMITTED, INVALID, etc.)
+   * - search: Full-text search
+   */
+  try {
+    const response = await api.get(`/batches/${batchId}/download/records/text`, { 
+      params,
+      responseType: 'blob'
+    });
+    
+    // Trigger download
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `${batchId}_records.txt`);
+    document.body.appendChild(link);
+    link.click();
+    link.parentNode.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  } catch (error) {
+    console.error('Failed to download text:', error);
+    throw error;
+  }
+};
+
 export const deleteBatch = async (batchId) => {
   const res = await api.delete(`/batches/${batchId}`);
   return res.data;

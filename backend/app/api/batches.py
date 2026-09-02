@@ -399,6 +399,115 @@ async def download_all_artifacts_zip(batch_id: str):
     return FileResponse(zip_path, filename=f"{batch_id}_results.zip", media_type="application/zip")
 
 
+@router.get("/{batch_id}/download/records/csv")
+async def download_records_as_csv(
+    batch_id: str,
+    success_flag: Optional[str] = None,
+    reason_code: Optional[str] = None,
+    status: Optional[str] = None,
+    search: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Download all parsed records (committed/shown in dashboard) as CSV format.
+    Includes all 17 APBS schema columns plus Status column.
+    
+    Query Parameters:
+        success_flag: Filter by success flag (e.g., "1", "0")
+        reason_code: Filter by reason code
+        status: Filter by status (COMMITTED, INVALID, etc.)
+        search: Full-text search across Aadhaar, name, account numbers
+    """
+    try:
+        from app.services.record_service import get_paginated_parsed_records
+        from app.services.download_service import export_records_as_csv
+        
+        # Get all records (using large page size to get everything)
+        records_response = get_paginated_parsed_records(
+            batch_id=batch_id if batch_id.lower() != "all" else "ALL",
+            batch_status=None,
+            db=db,
+            page=1,
+            page_size=1000000,  # Large number to get all records
+            success_flag=success_flag,
+            reason_code=reason_code,
+            status_filter=status,
+            search=search,
+            force_refresh=False,
+        )
+        
+        columns = records_response.get("columns", [])
+        records = records_response.get("records", [])
+        
+        csv_content = export_records_as_csv(records, columns)
+        
+        print(f"[API] [DOWNLOAD] CSV export: {batch_id} ({len(records)} records)")
+        
+        return PlainTextResponse(
+            content=csv_content,
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{batch_id}_records.csv"'}
+        )
+    except Exception as e:
+        print(f"[API] [ERROR] Failed to export CSV: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/{batch_id}/download/records/text")
+async def download_records_as_text(
+    batch_id: str,
+    success_flag: Optional[str] = None,
+    reason_code: Optional[str] = None,
+    status: Optional[str] = None,
+    search: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Download all parsed records (committed/shown in dashboard) as pipe-delimited text format.
+    Includes all 17 APBS schema columns plus Status column.
+    Matches the format displayed in the dashboard.
+    
+    Query Parameters:
+        success_flag: Filter by success flag (e.g., "1", "0")
+        reason_code: Filter by reason code
+        status: Filter by status (COMMITTED, INVALID, etc.)
+        search: Full-text search across Aadhaar, name, account numbers
+    """
+    try:
+        from app.services.record_service import get_paginated_parsed_records
+        from app.services.download_service import export_records_as_text
+        
+        # Get all records (using large page size to get everything)
+        records_response = get_paginated_parsed_records(
+            batch_id=batch_id if batch_id.lower() != "all" else "ALL",
+            batch_status=None,
+            db=db,
+            page=1,
+            page_size=1000000,  # Large number to get all records
+            success_flag=success_flag,
+            reason_code=reason_code,
+            status_filter=status,
+            search=search,
+            force_refresh=False,
+        )
+        
+        columns = records_response.get("columns", [])
+        records = records_response.get("records", [])
+        
+        text_content = export_records_as_text(records, columns)
+        
+        print(f"[API] [DOWNLOAD] Text export: {batch_id} ({len(records)} records)")
+        
+        return PlainTextResponse(
+            content=text_content,
+            media_type="text/plain",
+            headers={"Content-Disposition": f'attachment; filename="{batch_id}_records.txt"'}
+        )
+    except Exception as e:
+        print(f"[API] [ERROR] Failed to export text: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.post("/{batch_id}/import", response_model=ImportResponseSchema)
 async def commit_batch_to_sql(batch_id: str, db: Session = Depends(get_db)):
     """

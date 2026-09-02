@@ -58,3 +58,7 @@ celerybeat.pid
 *.swo
 .DS_Store
 Thumbs.db
+
+# ── Cloned Dashboard Repo ──
+apbs-processing-dashboard/
+apbs-processing-dashboard-backend/
