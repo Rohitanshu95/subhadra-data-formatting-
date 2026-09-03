@@ -75,10 +75,14 @@ class DBFile(Base):
 
 class DBTransaction(Base):
     __tablename__ = "transactions"
+    __table_args__ = (
+        Index("ix_transactions_record_hash", "record_hash"),
+        Index("ix_transactions_batch_id", "batch_id"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    record_hash = Column(String(64), unique=True, nullable=False, index=True)
-    batch_id = Column(String(64), nullable=False, index=True)
+    record_hash = Column(String(64), unique=True, nullable=False)
+    batch_id = Column(String(64), nullable=False)
     file_id = Column(String(255), nullable=False)
     created_at = Column(DateTime, default=utc_now, nullable=False)
 

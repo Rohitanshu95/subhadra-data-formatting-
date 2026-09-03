@@ -249,22 +249,21 @@ class BatchManager:
                 err_path = os.path.join(str(paths.errors_dir), f"{base_name}_errors.txt")
 
                 if os.path.exists(out_path):
-                    valid_cnt = 0
+                    raw_lines = 0
                     try:
-                        with open(out_path, "r", encoding="utf-8") as of:
-                            for idx, l in enumerate(of):
-                                if idx > 0 and l.strip():
-                                    valid_cnt += 1
+                        with open(out_path, "rb") as bf:
+                            while chunk := bf.read(1024 * 1024):
+                                raw_lines += chunk.count(b"\n")
                     except Exception:
                         pass
+                    valid_cnt = max(0, raw_lines - 1)  # subtract header row
 
                     invalid_cnt = 0
                     if os.path.exists(err_path):
                         try:
-                            with open(err_path, "r", encoding="utf-8") as ef:
-                                for l in ef:
-                                    if l.strip():
-                                        invalid_cnt += 1
+                            with open(err_path, "rb") as ef:
+                                while chunk := ef.read(1024 * 1024):
+                                    invalid_cnt += chunk.count(b"\n")
                         except Exception:
                             pass
 
@@ -387,12 +386,12 @@ class BatchManager:
 
         batch.mark_processing()
         batch_paths = get_batch_paths(batch_id)
-        validator = StreamingValidator()
         record_log("RECORD", f"Started processing {len(ready_files)} file(s) for batch {batch_id}", batch_id=batch_id)
 
-        for file_meta in ready_files:
-            file_meta.mark_processing()
+        from concurrent.futures import ThreadPoolExecutor
 
+        def _process_file(file_meta):
+            file_meta.mark_processing()
             base_name = os.path.splitext(file_meta.sanitized_filename)[0]
             output_path = os.path.join(
                 str(batch_paths.output_dir), f"{base_name}_output.txt"
@@ -400,9 +399,10 @@ class BatchManager:
             error_path = os.path.join(
                 str(batch_paths.errors_dir), f"{base_name}_errors.txt"
             )
+            local_validator = StreamingValidator()
 
             try:
-                result = validator.process_file(
+                result = local_validator.process_file(
                     input_path=file_meta.input_path,
                     output_path=output_path,
                     error_path=error_path,
@@ -415,11 +415,13 @@ class BatchManager:
                     output_path=output_path,
                     error_path=error_path,
                 )
-                record_log("INDIVIDUAL DATA", f"Processed {file_meta.sanitized_filename}: {result.valid_records:,} valid, {result.invalid_records:,} invalid", batch_id=batch_id, file_id=file_meta.sanitized_filename)
             except Exception as e:
                 print(f"[PROCESS ERROR] Failed on {file_meta.sanitized_filename}: {e}")
                 file_meta.mark_failed()
-                record_log("ERROR", f"File validation failed for {file_meta.sanitized_filename}: {e}", batch_id=batch_id, file_id=file_meta.sanitized_filename)
+
+        worker_threads = min(8, os.cpu_count() or 4)
+        with ThreadPoolExecutor(max_workers=worker_threads) as executor:
+            list(executor.map(_process_file, ready_files))
 
         batch.mark_completed()
         self._sync_batch_to_db(batch)

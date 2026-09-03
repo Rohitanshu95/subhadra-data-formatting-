@@ -93,8 +93,8 @@ export default function Dashboard() {
     try {
       setLoading(true);
       const [batchesData, statsData] = await Promise.all([
-        listBatches(),
-        getOverviewStats().catch(() => null),
+        listBatches(forceRefresh),
+        getOverviewStats(forceRefresh).catch(() => null),
       ]);
       const batchesList = batchesData || [];
       overviewCacheRef.current = { batches: batchesList, stats: statsData };

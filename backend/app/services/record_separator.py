@@ -81,16 +81,32 @@ def stream_apbs_records(
     
     if is_newline_delimited:
         # ── Newline-Delimited Mode (Legacy) ────────────────────────
-        # Yield lines stripped of trailing \\r\\n
-        buffer = initial_chunk
+        # Stream line-by-line with constant memory using chunk boundaries
+        remainder = ""
         
-        # Read rest of file while maintaining buffer
+        # Process the initial_chunk first
+        for line in initial_chunk.splitlines(True):
+            if line.endswith('\n') or line.endswith('\r'):
+                record_number += 1
+                yield (record_number, line.rstrip('\r\n'))
+            else:
+                remainder = line  # partial line at end of chunk
+        
+        # Stream remaining file in chunks (constant memory)
         for chunk in iter(lambda: text_file.read(buffer_size), ''):
-            buffer += chunk
+            data = remainder + chunk
+            remainder = ""
+            for line in data.splitlines(True):
+                if line.endswith('\n') or line.endswith('\r'):
+                    record_number += 1
+                    yield (record_number, line.rstrip('\r\n'))
+                else:
+                    remainder = line  # partial line at end of chunk
         
-        for line in buffer.splitlines():
+        # Yield any remaining partial line at EOF
+        if remainder.strip():
             record_number += 1
-            yield (record_number, line)
+            yield (record_number, remainder.rstrip('\r\n'))
     else:
         # ── Continuous Stream Mode (Fixed-Width) ───────────────────
         # Yield exactly record_length characters at a time

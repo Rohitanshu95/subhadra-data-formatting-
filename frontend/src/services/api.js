@@ -12,13 +12,13 @@ export const createBatch = async () => {
   return res.data;
 };
 
-export const listBatches = async () => {
-  const res = await api.get('/batches');
+export const listBatches = async (refresh = false) => {
+  const res = await api.get('/batches', { params: refresh ? { refresh: true } : {} });
   return res.data;
 };
 
-export const getOverviewStats = async () => {
-  const res = await api.get('/batches/overview/stats');
+export const getOverviewStats = async (refresh = false) => {
+  const res = await api.get('/batches/overview/stats', { params: refresh ? { refresh: true } : {} });
   return res.data;
 };
 
@@ -77,6 +77,11 @@ export const getBatchSummaryText = async (batchId) => {
 
 export const importBatchToSql = async (batchId) => {
   const res = await api.post(`/batches/${batchId}/import`);
+  return res.data;
+};
+
+export const getImportProgress = async (batchId) => {
+  const res = await api.get(`/batches/${batchId}/import-progress`);
   return res.data;
 };
 

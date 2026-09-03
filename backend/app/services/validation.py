@@ -98,6 +98,7 @@ class StreamingValidator:
             output_file=output_path,
             error_file=error_path,
         )
+        length_adjusted_count = 0
 
         with (
             OutputWriter(output_path, buffer_size=self._buffer_size) as output_writer,
@@ -126,14 +127,17 @@ class StreamingValidator:
                 # In lenient mode, we still need 177 chars for proper field parsing
                 # But we'll pad short records or truncate long ones
                 if len(line) != self._record_length:
+                    length_adjusted_count += 1
                     if len(line) < self._record_length:
                         # Pad short records with spaces
                         padded_line = line + (" " * (self._record_length - len(line)))
-                        print(f"[PARSER] [INFO]  Record {record_number:04d}: Length {len(line)} chars, padded to {self._record_length}")
+                        if length_adjusted_count <= 10:
+                            print(f"[PARSER] [INFO]  Record {record_number:04d}: Length {len(line)} chars, padded to {self._record_length}")
                         line = padded_line
                     else:
                         # Truncate long records to 177 chars
-                        print(f"[PARSER] [INFO]  Record {record_number:04d}: Length {len(line)} chars, truncated to {self._record_length}")
+                        if length_adjusted_count <= 10:
+                            print(f"[PARSER] [INFO]  Record {record_number:04d}: Length {len(line)} chars, truncated to {self._record_length}")
                         line = line[:self._record_length]
 
                 # ── Non-credit line detection (for legacy newline-delimited files) ───────────────────
@@ -167,8 +171,8 @@ class StreamingValidator:
                     result.valid_records += 1
                     output_writer.write_record(parsed)
 
-                # Periodic progress heartbeat every 5,000 records
-                if record_number % 5000 == 0:
+                # Periodic progress heartbeat every 10,000 records
+                if record_number % 10000 == 0:
                     print(f"[STREAM PARSER] [PROGRESS] {filename} -> {record_number:,} records processed ({result.valid_records:,} clean, {result.invalid_records:,} invalid)...")
 
         print("-" * 85)
@@ -177,6 +181,8 @@ class StreamingValidator:
         print(f"  * Records to Output   : {result.valid_records:,} (all valid & lenient-validated records)")
         print(f"  * Validation Warnings : {result.invalid_records:,} (logged but written to output)")
         print(f"  * Skipped Headers/Etc : {result.skipped_lines:,}")
+        if length_adjusted_count > 10:
+            print(f"  * Length-Adjusted Recs : {length_adjusted_count:,} total (first 10 logged above)")
         print(f"  * Processing Mode     : LENIENT (accept all data as-is, no records rejected)")
         print("=" * 85 + "\n")
 

@@ -18,6 +18,7 @@ import {
   getBatch, 
   verifyBatch, 
   importBatchToSql, 
+  getImportProgress,
   previewCleanRecords, 
   previewErrorRecords, 
   getBatchSummaryText,
@@ -37,6 +38,7 @@ export default function BatchResults() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [importResult, setImportResult] = useState(null);
+  const [importProgress, setImportProgress] = useState(null);
 
   const fetchAllData = async () => {
     try {
@@ -111,15 +113,47 @@ export default function BatchResults() {
       onConfirm: async () => {
         try {
           setActionLoading(true);
-          const res = await importBatchToSql(batchId);
-          setImportResult(res);
-          const updated = await getBatch(batchId);
-          setBatch(updated);
-          showToast(`Successfully committed ${res.total_imported} records to SQL database.`);
           closeModal();
+          const res = await importBatchToSql(batchId);
+          setImportProgress({
+            percent: 0,
+            file_idx: 0,
+            total_files: res.total_files || (batch?.files ? Object.keys(batch.files).length : 1),
+            total_imported: 0,
+            total_duplicates: 0,
+            current_file: 'Starting bulk import...',
+            status: 'IMPORTING'
+          });
+
+          // Start active polling of import progress
+          const interval = setInterval(async () => {
+            try {
+              const prog = await getImportProgress(batchId);
+              if (prog) {
+                setImportProgress(prog);
+                if (prog.status === 'IMPORTED' || prog.percent >= 100) {
+                  clearInterval(interval);
+                  setActionLoading(false);
+                  const updated = await getBatch(batchId);
+                  setBatch(updated);
+                  setImportResult({
+                    total_imported: prog.total_imported,
+                    total_duplicates: prog.total_duplicates,
+                    total_processed: prog.total_processed,
+                  });
+                  showToast(`Successfully committed ${prog.total_imported?.toLocaleString()} records to SQL database!`);
+                } else if (prog.status === 'FAILED') {
+                  clearInterval(interval);
+                  setActionLoading(false);
+                  showToast(`Import failed: ${prog.error || 'Unknown error'}`, 'error');
+                }
+              }
+            } catch (pErr) {
+              console.error('Progress poll error', pErr);
+            }
+          }, 800);
         } catch (err) {
-          showToast(err.response?.data?.detail || 'Failed to import batch to SQL', 'error');
-        } finally {
+          showToast(err.response?.data?.detail || 'Failed to start database import', 'error');
           setActionLoading(false);
         }
       }
@@ -239,6 +273,195 @@ export default function BatchResults() {
             )}
           </div>
         </div>
+
+        {importProgress && importProgress.status === 'IMPORTING' && (
+          <div style={{
+            marginTop: '20px',
+            background: 'linear-gradient(180deg, #f0f7ff 0%, #ffffff 100%)',
+            border: '1px solid #bfdbfe',
+            borderLeft: '5px solid #2563eb',
+            borderRadius: '10px',
+            padding: '22px',
+            boxShadow: '0 4px 20px -2px rgba(37, 99, 235, 0.12), 0 2px 6px -1px rgba(0, 0, 0, 0.04)',
+          }}>
+            {/* Header with Title & Highlight Badge */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', flexWrap: 'wrap', gap: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{
+                  width: '38px',
+                  height: '38px',
+                  borderRadius: '10px',
+                  background: '#dbeafe',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  border: '1px solid #93c5fd',
+                  boxShadow: '0 0 12px rgba(37, 99, 235, 0.2)',
+                }}>
+                  <Database size={20} color="#1d4ed8" className="animate-pulse" />
+                </div>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <h4 style={{ margin: 0, fontSize: '1.08rem', fontWeight: 700, color: '#0f172a' }}>
+                      Pushing Batch to Database...
+                    </h4>
+                    <span style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      background: '#dbeafe',
+                      color: '#1d4ed8',
+                      fontSize: '0.72rem',
+                      fontWeight: 700,
+                      padding: '2px 8px',
+                      borderRadius: '12px',
+                      border: '1px solid #bfdbfe',
+                    }}>
+                      <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#2563eb', display: 'inline-block' }} />
+                      Active Ingestion
+                    </span>
+                  </div>
+                  <p style={{ margin: '2px 0 0', fontSize: '0.82rem', color: '#64748b' }}>
+                    Streaming clean APBS records directly into MySQL transactions table
+                  </p>
+                </div>
+              </div>
+
+              <div style={{
+                background: '#2563eb',
+                color: '#ffffff',
+                padding: '6px 16px',
+                borderRadius: '20px',
+                fontSize: '0.9rem',
+                fontWeight: 700,
+                fontFamily: 'var(--font-mono)',
+                boxShadow: '0 2px 8px rgba(37, 99, 235, 0.3)',
+              }}>
+                {importProgress.percent}% Complete
+              </div>
+            </div>
+
+            {/* Slightly Highlighted Ingestion Telemetry Cards */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+              gap: '12px',
+              marginBottom: '18px',
+            }}>
+              <div style={{
+                background: '#ffffff',
+                border: '1px solid #e2e8f0',
+                borderTop: '3px solid #2563eb',
+                borderRadius: '8px',
+                padding: '12px 14px',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+              }}>
+                <div style={{ fontSize: '0.72rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.03em' }}>Data Pushed</div>
+                <div style={{ fontSize: '1.28rem', fontWeight: 800, color: '#1d4ed8', marginTop: '3px', fontFamily: 'var(--font-mono)' }}>
+                  {importProgress.data_pushed_mb || 0} <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 600 }}>MB</span>
+                </div>
+                <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '2px' }}>
+                  {importProgress.total_imported?.toLocaleString()} records
+                </div>
+              </div>
+
+              <div style={{
+                background: '#ffffff',
+                border: '1px solid #e2e8f0',
+                borderTop: '3px solid #0284c7',
+                borderRadius: '8px',
+                padding: '12px 14px',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+              }}>
+                <div style={{ fontSize: '0.72rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.03em' }}>Files Buffer</div>
+                <div style={{ fontSize: '1.28rem', fontWeight: 800, color: '#0f172a', marginTop: '3px', fontFamily: 'var(--font-mono)' }}>
+                  {importProgress.file_idx} <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 600 }}>/ {importProgress.total_files}</span>
+                </div>
+                <div style={{ fontSize: '0.75rem', color: '#16a34a', marginTop: '2px', fontWeight: 600 }}>
+                  {Math.max(0, (importProgress.total_files || 0) - (importProgress.file_idx || 0))} remaining
+                </div>
+              </div>
+
+              <div style={{
+                background: '#ffffff',
+                border: '1px solid #e2e8f0',
+                borderTop: '3px solid #16a34a',
+                borderRadius: '8px',
+                padding: '12px 14px',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+              }}>
+                <div style={{ fontSize: '0.72rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.03em' }}>Throughput</div>
+                <div style={{ fontSize: '1.28rem', fontWeight: 800, color: '#15803d', marginTop: '3px', fontFamily: 'var(--font-mono)' }}>
+                  {importProgress.speed_records_sec?.toLocaleString() || 0}
+                </div>
+                <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '2px' }}>records / sec</div>
+              </div>
+
+              <div style={{
+                background: '#ffffff',
+                border: '1px solid #e2e8f0',
+                borderTop: '3px solid #d97706',
+                borderRadius: '8px',
+                padding: '12px 14px',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+              }}>
+                <div style={{ fontSize: '0.72rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.03em' }}>Estimated Time</div>
+                <div style={{ fontSize: '1.28rem', fontWeight: 800, color: '#b45309', marginTop: '3px', fontFamily: 'var(--font-mono)' }}>
+                  ~{importProgress.eta_formatted || '0s'}
+                </div>
+                <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '2px' }}>
+                  Elapsed: {importProgress.elapsed_seconds || 0}s
+                </div>
+              </div>
+            </div>
+
+            {/* Highlighted Gradient Progress Bar */}
+            <div style={{ marginBottom: '14px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', color: '#475569', marginBottom: '6px' }}>
+                <span style={{ fontWeight: 600 }}>Database Buffer Progress</span>
+                <span style={{ color: '#2563eb', fontWeight: 800 }}>{importProgress.percent}%</span>
+              </div>
+              <div style={{
+                width: '100%',
+                height: '11px',
+                background: '#e2e8f0',
+                borderRadius: '6px',
+                overflow: 'hidden',
+                boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.08)',
+              }}>
+                <div style={{
+                  width: `${Math.max(2, importProgress.percent)}%`,
+                  height: '100%',
+                  background: 'linear-gradient(90deg, #2563eb 0%, #3b82f6 60%, #10b981 100%)',
+                  borderRadius: '6px',
+                  boxShadow: '0 0 10px rgba(37, 99, 235, 0.4)',
+                  transition: 'width 0.4s ease-out',
+                }} />
+              </div>
+            </div>
+
+            {/* Active File and Duplicate Info */}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              fontSize: '0.82rem',
+              color: '#475569',
+              background: '#f8fafc',
+              padding: '9px 14px',
+              borderRadius: '6px',
+              border: '1px solid #e2e8f0',
+              flexWrap: 'wrap',
+              gap: '8px',
+            }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Loader2 size={14} className="animate-spin" color="#2563eb" />
+                <span>Current buffer file: <code style={{ color: '#0f172a', fontWeight: 700 }}>{importProgress.current_file}</code></span>
+              </span>
+              <span>Duplicates diverted: <strong style={{ color: '#b45309' }}>{importProgress.total_duplicates?.toLocaleString()}</strong></span>
+            </div>
+          </div>
+        )}
 
         {importResult && (
           <div style={{

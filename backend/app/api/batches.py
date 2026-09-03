@@ -30,6 +30,7 @@ from app.services.preview import (
     get_error_records_preview,
     get_summary_content,
 )
+from app.services.cache_service import app_cache
 from app.workers.file_worker import default_batch_manager, process_batch_task
 
 # Ensure database tables exist
@@ -66,6 +67,7 @@ def run_batch_synchronously(batch_id: str):
         from app.services.summary import generate_batch_summary
         batch = default_batch_manager.get_batch(batch_id)
         generate_batch_summary(batch)
+        app_cache.invalidate_all()
         print(f"[BACKGROUND ENGINE] [DONE] Completed batch {batch_id} processing!\n")
     except Exception as e:
         print(f"[BACKGROUND ENGINE] [ERROR] Error processing batch {batch_id}: {e}")
@@ -75,24 +77,43 @@ def run_batch_synchronously(batch_id: str):
 async def create_batch():
     """Create a new batch."""
     batch = default_batch_manager.create_batch()
+    app_cache.invalidate_all()
     print(f"\n[API] [CREATE] Created new batch: {batch.batch_id}")
     return batch
 
 
 @router.get("", response_model=List[BatchMetadataSchema])
-async def list_batches():
-    """List all batches."""
-    return default_batch_manager.list_batches()
+async def list_batches(refresh: bool = False):
+    """
+    List all batches.
+    User Default: returns cached batch list from RAM memory (0ms latency).
+    User Refresh (refresh=true): reloads batches from database & storage, refreshes RAM cache.
+    """
+    if not refresh:
+        cached = app_cache.get_batches()
+        if cached is not None:
+            return cached
+
+    batches = default_batch_manager.list_batches()
+    app_cache.set_batches(batches)
+    return batches
 
 
 @router.get("/overview/stats")
-async def get_overview_stats(db: Session = Depends(get_db)):
+async def get_overview_stats(refresh: bool = False, db: Session = Depends(get_db)):
     """
-    Get system-wide overview statistics structured around the 5 DB pipeline stages.
-    Guarantees 100% mathematical reconciliation with the registered batches table.
+    Get system-wide overview statistics.
+    User Default: returns cached overview data from RAM memory (0ms latency, zero DB query).
+    User Refresh (refresh=true): queries MySQL for fresh counts and refreshes RAM memory cache.
     """
+    if not refresh:
+        cached = app_cache.get_overview_stats()
+        if cached is not None:
+            return cached
+
     from app.models.db_models import DBTransaction, DBDuplicateLog
     batches = default_batch_manager.list_batches()
+    app_cache.set_batches(batches)
     
     total_records_parsed = sum(b.total_records for b in batches)
     awaiting_verification = sum(
@@ -105,21 +126,23 @@ async def get_overview_stats(db: Session = Depends(get_db)):
         )
     )
     
-    # Live counts directly from SQL database
-    committed_to_db = db.query(DBTransaction).count()
-    db_dups_count = db.query(DBDuplicateLog).count()
+    # Reconciled counts from batch records for instant response without table-scan locks
+    committed_to_db = sum(
+        b.valid_records for b in batches
+        if (hasattr(b.status, "value") and b.status.value == "IMPORTED") or str(b.status) == "IMPORTED"
+    )
+    db_dups_count = db.query(DBDuplicateLog.id).count()
     file_dups_count = sum(b.duplicate_files for b in batches)
     duplicates_skipped = db_dups_count + file_dups_count
     failed_records = sum(b.invalid_records for b in batches)
     
-    return {
+    stats_data = {
         "total_batches": len(batches),
         "total_records_parsed": total_records_parsed,
         "awaiting_verification": awaiting_verification,
         "committed_to_db": committed_to_db,
         "duplicates_skipped": duplicates_skipped,
         "failed_records": failed_records,
-        # Backward-compatible fields
         "total_records": total_records_parsed,
         "valid_records": sum(b.valid_records for b in batches),
         "invalid_records": failed_records,
@@ -127,6 +150,8 @@ async def get_overview_stats(db: Session = Depends(get_db)):
         "db_transactions_count": committed_to_db,
         "db_duplicates_count": db_dups_count,
     }
+    app_cache.set_overview_stats(stats_data)
+    return stats_data
 
 
 @router.get("/{batch_id}/records")
@@ -213,6 +238,7 @@ async def upload_files(batch_id: str, files: List[UploadFile] = File(...)):
             )
             print(f"  * Uploaded: {file_meta.sanitized_filename} ({file_meta.size:,} bytes) | SHA-256: {file_meta.sha256[:16]}... | Status: {file_meta.status.value}")
             uploaded_results.append(file_meta)
+        app_cache.invalidate_all()
         return uploaded_results
     except BatchNotFoundError:
         raise HTTPException(status_code=404, detail=f"Batch '{batch_id}' not found")
@@ -508,10 +534,34 @@ async def download_records_as_text(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.post("/{batch_id}/import", response_model=ImportResponseSchema)
-async def commit_batch_to_sql(batch_id: str, db: Session = Depends(get_db)):
+def run_import_background(batch_id: str):
+    """Background worker task to execute database import without blocking HTTP server."""
+    from app.core.database import SessionLocal
+    db = SessionLocal()
+    try:
+        print(f"\n[BACKGROUND ENGINE] [IMPORT] Starting background import for Batch: {batch_id}")
+        batch = default_batch_manager.get_batch(batch_id)
+        batch.status = BatchStatus.IMPORTING
+        default_batch_manager._sync_batch_to_db(batch)
+        importer = ImportService()
+        result = importer.import_batch(batch_id, db)
+        batch.status = BatchStatus.IMPORTED
+        default_batch_manager._sync_batch_to_db(batch)
+        app_cache.invalidate_all()
+        print(f"[BACKGROUND ENGINE] [IMPORT] Successfully finished background import for {batch_id}: {result.total_imported:,} records.\n")
+    except Exception as e:
+        print(f"[BACKGROUND ENGINE] [ERROR] Background import failed for {batch_id}: {e}")
+        from app.services.import_service import import_progress_tracker
+        import_progress_tracker.fail(batch_id, str(e))
+    finally:
+        db.close()
+
+
+@router.post("/{batch_id}/import")
+def commit_batch_to_sql(batch_id: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """
-    Explicit SQL database commit. Imports clean data into transactions table.
+    Explicit SQL database commit. Dispatches high-speed import to background worker
+    and immediately returns with initial progress tracking state.
     """
     try:
         batch = default_batch_manager.get_batch(batch_id)
@@ -525,21 +575,49 @@ async def commit_batch_to_sql(batch_id: str, db: Session = Depends(get_db)):
                 detail=f"Cannot import batch in state '{batch.status.value}'. Must be processed/verified.",
             )
 
-        print(f"\n[API] [IMPORT] Authorizing SQL database import for Batch: {batch_id}")
-        importer = ImportService()
-        result = importer.import_batch(batch_id, db)
-        batch.status = BatchStatus.IMPORTED
+        from app.services.import_service import import_progress_tracker
+        import_progress_tracker.start(batch_id, len(batch.files))
+        batch.status = BatchStatus.IMPORTING
         default_batch_manager._sync_batch_to_db(batch)
 
-        return ImportResponseSchema(
-            batch_id=batch_id,
-            status=batch.status.value,
-            total_processed=result.total_processed,
-            total_imported=result.total_imported,
-            total_duplicates=result.total_duplicates,
-        )
+        background_tasks.add_task(run_import_background, batch_id)
+
+        return {
+            "batch_id": batch_id,
+            "status": "IMPORTING",
+            "message": "Database import running in background",
+            "total_files": len(batch.files),
+        }
     except BatchNotFoundError:
         raise HTTPException(status_code=404, detail=f"Batch '{batch_id}' not found")
+
+
+@router.get("/{batch_id}/import-progress")
+def get_batch_import_progress(batch_id: str):
+    """
+    Get live real-time progress metrics for an ongoing or completed database import.
+    """
+    from app.services.import_service import import_progress_tracker
+    progress = import_progress_tracker.get(batch_id)
+    if not progress:
+        try:
+            batch = default_batch_manager.get_batch(batch_id)
+            is_imp = batch.status in (BatchStatus.IMPORTED, "IMPORTED")
+            return {
+                "batch_id": batch_id,
+                "status": "IMPORTED" if is_imp else (batch.status.value if hasattr(batch.status, "value") else str(batch.status)),
+                "percent": 100.0 if is_imp else 0.0,
+                "file_idx": len(batch.files) if is_imp else 0,
+                "total_files": len(batch.files),
+                "current_file": "Completed" if is_imp else "Pending",
+                "total_imported": batch.valid_records if is_imp else 0,
+                "total_duplicates": getattr(batch, "duplicate_records", 0),
+                "error": None,
+            }
+        except BatchNotFoundError:
+            raise HTTPException(status_code=404, detail=f"Batch '{batch_id}' not found")
+
+    return progress
 
 
 @router.delete("/{batch_id}")
@@ -551,6 +629,7 @@ async def delete_batch_endpoint(batch_id: str, db: Session = Depends(get_db)):
         from app.services.record_service import clear_records_cache
         res = default_batch_manager.delete_batch(batch_id, db=db)
         clear_records_cache()
+        app_cache.invalidate_all()
         return res
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete batch: {str(e)}")

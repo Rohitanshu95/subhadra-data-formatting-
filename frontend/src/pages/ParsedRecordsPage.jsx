@@ -61,7 +61,7 @@ export default function ParsedRecordsPage() {
     }
   }, [batchId]);
 
-  const fetchRecords = useCallback(async () => {
+  const fetchRecords = useCallback(async (forceRefresh = false) => {
     try {
       setLoading(true);
       const params = {
@@ -72,6 +72,7 @@ export default function ParsedRecordsPage() {
       if (reasonCode.trim() !== '') params.reason_code = reasonCode.trim();
       if (statusFilter !== 'ALL') params.status = statusFilter;
       if (debouncedSearch.trim() !== '') params.search = debouncedSearch.trim();
+      if (forceRefresh) params.refresh = true;
 
       const data = await getParsedRecords(batchId, params);
       setRecords(data.records || []);
@@ -345,7 +346,7 @@ export default function ParsedRecordsPage() {
 
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
           <button 
-            onClick={fetchRecords} 
+            onClick={() => fetchRecords(true)} 
             className="btn btn-secondary"
             disabled={loading}
           >

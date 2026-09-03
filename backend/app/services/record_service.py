@@ -114,23 +114,13 @@ def _parse_output_line(line: str, source_file: str = "") -> Optional[Dict[str, A
     return rec
 
 
-_RECORDS_CACHE: Dict[str, Any] = {
-    "system_all": None,
-    "system_errors": None,
-    "batches": {},
-    "batch_errors": {},
-}
+from app.services.cache_service import app_cache
 
 
 def clear_records_cache():
     """Clear in-memory cached record datasets when database or files are modified."""
-    global _RECORDS_CACHE
-    _RECORDS_CACHE = {
-        "system_all": None,
-        "system_errors": None,
-        "batches": {},
-        "batch_errors": {},
-    }
+    app_cache.invalidate_records()
+
 
 
 def get_paginated_parsed_records(
@@ -241,12 +231,12 @@ def get_paginated_parsed_records(
 
     # If querying all batches or a single batch
     if b_id == "ALL":
-        cached_recs = _RECORDS_CACHE.get("system_all")
+        cached_recs = app_cache.get_records("system_all")
         if cached_recs is not None:
             records = cached_recs
         else:
             if db:
-                tx_query = db.query(DBTransaction)
+                tx_query = db.query(DBTransaction).order_by(DBTransaction.id.desc()).limit(20000)
                 for tx in tx_query.all():
                     rec = {f_name: getattr(tx, f_name, "") for f_name in CANONICAL_FIELD_NAMES}
                     rec["id"] = str(tx.id)
@@ -255,7 +245,7 @@ def get_paginated_parsed_records(
                     rec["_source_file"] = tx.file_id or ""
                     records.append(rec)
 
-                dup_query = db.query(DBDuplicateLog)
+                dup_query = db.query(DBDuplicateLog).order_by(DBDuplicateLog.id.desc()).limit(5000)
                 for dup in dup_query.all():
                     rec = {f_name: "" for f_name in CANONICAL_FIELD_NAMES}
                     rec["id"] = f"dup_{dup.id}"
@@ -299,34 +289,65 @@ def get_paginated_parsed_records(
                                         parsed_err = _parse_error_line(line, source_file=fname, batch_id=b_dir)
                                         if parsed_err:
                                             records.append(parsed_err)
-            _RECORDS_CACHE["system_all"] = records
+            app_cache.set_records("system_all", records)
     else:
-        cached_recs = _RECORDS_CACHE.get("batches", {}).get(batch_id)
+        cached_recs = app_cache.get_records(batch_id)
         if cached_recs is not None:
             records = cached_recs
         else:
             is_imported = (batch_status == BatchStatus.IMPORTED.value or batch_status == "IMPORTED")
             if is_imported and db:
                 data_source = "Production Database (transactions table)"
-                tx_query = db.query(DBTransaction).filter(DBTransaction.batch_id == batch_id)
-                for tx in tx_query.all():
+                page_cache_key = f"sql_page:{batch_id}:{page}:{page_size}:{success_flag}:{reason_code}:{status_filter}:{search}"
+                if not force_refresh:
+                    cached_page = app_cache.get_records(page_cache_key)
+                    if cached_page is not None:
+                        return cached_page
+
+                query = db.query(DBTransaction).filter(DBTransaction.batch_id == batch_id)
+                if success_flag is not None and str(success_flag).strip() != "":
+                    query = query.filter(DBTransaction.success_flag == str(success_flag).strip())
+                if reason_code is not None and str(reason_code).strip() != "":
+                    query = query.filter(DBTransaction.reason_code == str(reason_code).strip())
+                if search and str(search).strip() != "":
+                    s = f"%{str(search).strip()}%"
+                    query = query.filter(
+                        (DBTransaction.beneficiary_aadhaar_number.like(s)) |
+                        (DBTransaction.beneficiary_name.like(s)) |
+                        (DBTransaction.user_credit_reference.like(s)) |
+                        (DBTransaction.destination_bank_account_number.like(s))
+                    )
+
+                from app.workers.file_worker import default_batch_manager
+                batch_obj = default_batch_manager._batches.get(batch_id)
+                total = batch_obj.valid_records if (batch_obj and not success_flag and not reason_code and not search) else query.count()
+
+                page_size = min(max(1, page_size), 1000)
+                offset = (page - 1) * page_size
+                tx_page = query.order_by(DBTransaction.id.asc()).offset(offset).limit(page_size).all()
+
+                paged_records = []
+                for tx in tx_page:
                     rec = {f_name: getattr(tx, f_name, "") for f_name in CANONICAL_FIELD_NAMES}
                     rec["id"] = str(tx.id)
                     rec["status"] = "Committed"
                     rec["batch_id"] = tx.batch_id
                     rec["_source_file"] = tx.file_id or ""
-                    records.append(rec)
+                    paged_records.append(rec)
 
-                dup_query = db.query(DBDuplicateLog).filter(DBDuplicateLog.attempted_batch_id == batch_id)
-                for dup in dup_query.all():
-                    rec = {f_name: "" for f_name in CANONICAL_FIELD_NAMES}
-                    rec["id"] = f"dup_{dup.id}"
-                    rec["user_credit_reference"] = dup.record_hash[:13]
-                    rec["status"] = "Duplicate"
-                    rec["reason_code"] = "DUP"
-                    rec["batch_id"] = dup.attempted_batch_id
-                    rec["_source_file"] = dup.attempted_file_id or ""
-                    records.append(rec)
+                total_pages = max(1, (total + page_size - 1) // page_size)
+                result = {
+                    "batch_id": batch_id,
+                    "data_source": data_source,
+                    "total": total,
+                    "page": page,
+                    "page_size": page_size,
+                    "total_pages": total_pages,
+                    "columns": CANONICAL_FIELD_NAMES + ["status"],
+                    "records": paged_records,
+                }
+                app_cache.set_records(page_cache_key, result)
+                return result
             else:
                 data_source = "records_staging"
                 batch_paths = get_batch_paths(batch_id)
@@ -355,7 +376,7 @@ def get_paginated_parsed_records(
                                     parsed_err = _parse_error_line(line, source_file=fname, batch_id=batch_id)
                                     if parsed_err:
                                         records.append(parsed_err)
-            _RECORDS_CACHE["batches"][batch_id] = records
+            app_cache.set_records(batch_id, records)
 
     # Apply dynamic in-memory filtering
     filtered = []
