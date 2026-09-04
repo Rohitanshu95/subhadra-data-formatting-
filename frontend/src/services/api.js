@@ -97,8 +97,8 @@ export const getParsedRecords = async (batchId, params = {}) => {
 
 export const downloadRecordsAsCSV = async (batchId, params = {}) => {
   /**
-   * Download all records in CSV format via native stream download.
-   * When batchId is 'all', downloads ALL data present in the MySQL database.
+   * Download records in CSV format via native stream download.
+   * When batchId is 'all' and params is empty, downloads 100% of all records in the database.
    */
   try {
     const queryParams = new URLSearchParams();
@@ -113,7 +113,7 @@ export const downloadRecordsAsCSV = async (batchId, params = {}) => {
 
     const link = document.createElement('a');
     link.href = downloadUrl;
-    link.setAttribute('download', `${target === 'all' ? 'complete_database' : target}_records.csv`);
+    link.setAttribute('download', `${target === 'all' ? 'all_records_complete_database' : target}_records.csv`);
     document.body.appendChild(link);
     link.click();
     setTimeout(() => {
@@ -129,8 +129,8 @@ export const downloadRecordsAsCSV = async (batchId, params = {}) => {
 
 export const downloadRecordsAsText = async (batchId, params = {}) => {
   /**
-   * Download all records in pipe-delimited text format via native stream download.
-   * When batchId is 'all', downloads ALL data present in the MySQL database.
+   * Download records in pipe-delimited text format via native stream download.
+   * When batchId is 'all' and params is empty, downloads 100% of all records in the database.
    */
   try {
     const queryParams = new URLSearchParams();
@@ -145,7 +145,7 @@ export const downloadRecordsAsText = async (batchId, params = {}) => {
 
     const link = document.createElement('a');
     link.href = downloadUrl;
-    link.setAttribute('download', `${target === 'all' ? 'complete_database' : target}_records.txt`);
+    link.setAttribute('download', `${target === 'all' ? 'all_records_complete_database' : target}_records.txt`);
     document.body.appendChild(link);
     link.click();
     setTimeout(() => {

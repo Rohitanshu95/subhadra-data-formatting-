@@ -212,26 +212,28 @@ export default function Dashboard() {
     setPage(1);
   };
 
-  const handleDownloadRecords = async (format) => {
+  const handleDownloadRecords = async (format, downloadAll = true) => {
     try {
       const params = {};
-      
-      if (selectedBatch && selectedBatch !== 'ALL') {
-        params.batch_id = selectedBatch;
-      }
-      if (successFlag !== '') params.success_flag = successFlag;
-      if (reasonCode.trim() !== '') params.reason_code = reasonCode.trim();
-      if (statusFilter !== 'ALL') params.status = statusFilter;
-      if (debouncedSearch.trim() !== '') params.search = debouncedSearch.trim();
+      let batchTarget = 'all';
 
-      const batchTarget = selectedBatch && selectedBatch !== 'ALL' ? selectedBatch : 'all';
-      
+      if (!downloadAll) {
+        if (selectedBatch && selectedBatch !== 'ALL') {
+          params.batch_id = selectedBatch;
+          batchTarget = selectedBatch;
+        }
+        if (successFlag !== '') params.success_flag = successFlag;
+        if (reasonCode.trim() !== '') params.reason_code = reasonCode.trim();
+        if (statusFilter !== 'ALL') params.status = statusFilter;
+        if (debouncedSearch.trim() !== '') params.search = debouncedSearch.trim();
+      }
+
       if (format === 'csv') {
         await downloadRecordsAsCSV(batchTarget, params);
-        showToast(`Streaming ${batchTarget === 'all' ? 'entire database' : batchTarget} CSV download...`);
+        showToast(downloadAll ? 'Downloading ALL records from complete database (CSV)...' : `Streaming ${batchTarget} CSV download...`);
       } else if (format === 'text') {
         await downloadRecordsAsText(batchTarget, params);
-        showToast(`Streaming ${batchTarget === 'all' ? 'entire database' : batchTarget} Text download...`);
+        showToast(downloadAll ? 'Downloading ALL records from complete database (Text)...' : `Streaming ${batchTarget} Text download...`);
       }
     } catch (err) {
       console.error(`Failed to download ${format}:`, err);
@@ -921,8 +923,8 @@ export default function Dashboard() {
                 {/* Download Options */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <button
-                    onClick={() => handleDownloadRecords('csv')}
-                    disabled={totalRecords === 0}
+                    onClick={() => handleDownloadRecords('csv', true)}
+                    disabled={committedToDb === 0 && totalRecords === 0}
                     className="btn btn-secondary"
                     style={{ 
                       padding: '6px 12px', 
@@ -935,14 +937,14 @@ export default function Dashboard() {
                       alignItems: 'center',
                       gap: '4px'
                     }}
-                    title={selectedBatch === 'ALL' ? "Download complete database records as CSV" : `Download all records for ${selectedBatch} as CSV`}
+                    title="Download ALL records present in the database as CSV"
                   >
                     <Download size={14} />
-                    {selectedBatch === 'ALL' ? 'CSV (Whole DB)' : 'CSV'}
+                    CSV (All Records)
                   </button>
                   <button
-                    onClick={() => handleDownloadRecords('text')}
-                    disabled={totalRecords === 0}
+                    onClick={() => handleDownloadRecords('text', true)}
+                    disabled={committedToDb === 0 && totalRecords === 0}
                     className="btn btn-secondary"
                     style={{ 
                       padding: '6px 12px', 
@@ -955,11 +957,56 @@ export default function Dashboard() {
                       alignItems: 'center',
                       gap: '4px'
                     }}
-                    title={selectedBatch === 'ALL' ? "Download complete database records as pipe-delimited text" : `Download all records for ${selectedBatch} as Text`}
+                    title="Download ALL records present in the database as pipe-delimited text"
                   >
                     <Download size={14} />
-                    {selectedBatch === 'ALL' ? 'Text (Whole DB)' : 'Text'}
+                    Text (All Records)
                   </button>
+
+                  {hasActiveFilters && (
+                    <>
+                      <button
+                        onClick={() => handleDownloadRecords('csv', false)}
+                        disabled={totalRecords === 0}
+                        className="btn btn-secondary"
+                        style={{ 
+                          padding: '6px 10px', 
+                          fontSize: '0.75rem',
+                          fontWeight: 500,
+                          backgroundColor: '#f8fafc',
+                          borderColor: '#cbd5e1',
+                          color: '#475569',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px'
+                        }}
+                        title={`Download only the ${totalRecords.toLocaleString()} filtered records as CSV`}
+                      >
+                        <Download size={12} />
+                        CSV (Filtered)
+                      </button>
+                      <button
+                        onClick={() => handleDownloadRecords('text', false)}
+                        disabled={totalRecords === 0}
+                        className="btn btn-secondary"
+                        style={{ 
+                          padding: '6px 10px', 
+                          fontSize: '0.75rem',
+                          fontWeight: 500,
+                          backgroundColor: '#f8fafc',
+                          borderColor: '#cbd5e1',
+                          color: '#475569',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px'
+                        }}
+                        title={`Download only the ${totalRecords.toLocaleString()} filtered records as Text`}
+                      >
+                        <Download size={12} />
+                        Text (Filtered)
+                      </button>
+                    </>
+                  )}
                 </div>
 
                 {/* Divider */}

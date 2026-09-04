@@ -457,6 +457,7 @@ async def download_records_as_csv(
             headers={
                 "Content-Disposition": f'attachment; filename="{filename}"',
                 "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
             }
         )
     except Exception as e:
@@ -496,6 +497,7 @@ async def download_records_as_text(
             headers={
                 "Content-Disposition": f'attachment; filename="{filename}"',
                 "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
             }
         )
     except Exception as e:

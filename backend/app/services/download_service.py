@@ -227,8 +227,40 @@ def stream_records_as_csv(
     if remaining:
         yield remaining
         
-    # If a specific batch had 0 DB records, fallback to staging files
-    if not is_all and row_count == 0:
+    # When downloading ALL, also check if any batches in storage/output are uncommitted to DB
+    if is_all:
+        from app.core.config import settings
+        input_base = os.path.join(str(settings.STORAGE_BASE_DIR), "output")
+        if os.path.exists(input_base):
+            try:
+                from sqlalchemy import distinct
+                db_batches = set(r[0] for r in db.query(distinct(DBTransaction.batch_id)).all())
+                for b_dir in sorted(os.listdir(input_base)):
+                    if b_dir not in db_batches:
+                        out_dir = os.path.join(input_base, b_dir)
+                        if os.path.isdir(out_dir):
+                            for fname in sorted(os.listdir(out_dir)):
+                                if fname.endswith("_output.txt"):
+                                    fpath = os.path.join(out_dir, fname)
+                                    with open(fpath, "r", encoding="utf-8") as f:
+                                        f.readline()
+                                        for line in f:
+                                            parts = line.strip().split("|")
+                                            if len(parts) >= 17:
+                                                writer.writerow([b_dir] + parts[:17] + ["Pending Verification"])
+                                                row_count += 1
+                                                if row_count % 5000 == 0:
+                                                    chunk = buffer.getvalue()
+                                                    buffer.seek(0)
+                                                    buffer.truncate(0)
+                                                    yield chunk
+                rem = buffer.getvalue()
+                if rem:
+                    yield rem
+            except Exception as e:
+                print(f"[DOWNLOAD] Warning checking uncommitted staging batches: {e}")
+    elif row_count == 0:
+        # Fallback to staging files for single batch if 0 DB records
         batch_paths = get_batch_paths(batch_id)
         out_dir = str(batch_paths.output_dir)
         if os.path.exists(out_dir):
@@ -318,8 +350,38 @@ def stream_records_as_text(
     if chunk:
         yield "".join(chunk)
         
-    # If a specific batch had 0 DB records, fallback to staging files
-    if not is_all and row_count == 0:
+    # When downloading ALL, also check if any batches in storage/output are uncommitted to DB
+    if is_all:
+        from app.core.config import settings
+        input_base = os.path.join(str(settings.STORAGE_BASE_DIR), "output")
+        if os.path.exists(input_base):
+            try:
+                from sqlalchemy import distinct
+                db_batches = set(r[0] for r in db.query(distinct(DBTransaction.batch_id)).all())
+                staging_chunk = []
+                for b_dir in sorted(os.listdir(input_base)):
+                    if b_dir not in db_batches:
+                        out_dir = os.path.join(input_base, b_dir)
+                        if os.path.isdir(out_dir):
+                            for fname in sorted(os.listdir(out_dir)):
+                                if fname.endswith("_output.txt"):
+                                    fpath = os.path.join(out_dir, fname)
+                                    with open(fpath, "r", encoding="utf-8") as f:
+                                        f.readline()
+                                        for line in f:
+                                            parts = line.strip().split("|")
+                                            if len(parts) >= 17:
+                                                staging_chunk.append(f"{b_dir}|" + "|".join(parts[:17]) + "|Pending Verification\n")
+                                                row_count += 1
+                                                if len(staging_chunk) >= 5000:
+                                                    yield "".join(staging_chunk)
+                                                    staging_chunk = []
+                if staging_chunk:
+                    yield "".join(staging_chunk)
+            except Exception as e:
+                print(f"[DOWNLOAD] Warning checking uncommitted staging batches (text): {e}")
+    elif row_count == 0:
+        # Fallback to staging files for single batch if 0 DB records
         batch_paths = get_batch_paths(batch_id)
         out_dir = str(batch_paths.output_dir)
         if os.path.exists(out_dir):
