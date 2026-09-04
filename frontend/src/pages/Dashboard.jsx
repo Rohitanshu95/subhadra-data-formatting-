@@ -214,10 +214,7 @@ export default function Dashboard() {
 
   const handleDownloadRecords = async (format) => {
     try {
-      setRecordsLoading(true);
-      
-      // Build params from current filters
-      const params = { page: 1, page_size: 1000000 };
+      const params = {};
       
       if (selectedBatch && selectedBatch !== 'ALL') {
         params.batch_id = selectedBatch;
@@ -231,16 +228,14 @@ export default function Dashboard() {
       
       if (format === 'csv') {
         await downloadRecordsAsCSV(batchTarget, params);
-        showToast(`Downloaded ${totalRecords} records as CSV`);
+        showToast(`Streaming ${batchTarget === 'all' ? 'entire database' : batchTarget} CSV download...`);
       } else if (format === 'text') {
         await downloadRecordsAsText(batchTarget, params);
-        showToast(`Downloaded ${totalRecords} records as Text`);
+        showToast(`Streaming ${batchTarget === 'all' ? 'entire database' : batchTarget} Text download...`);
       }
     } catch (err) {
       console.error(`Failed to download ${format}:`, err);
       showToast(`Failed to download records as ${format.toUpperCase()}`, 'error');
-    } finally {
-      setRecordsLoading(false);
     }
   };
 
@@ -927,11 +922,12 @@ export default function Dashboard() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <button
                     onClick={() => handleDownloadRecords('csv')}
-                    disabled={totalRecords === 0 || recordsLoading}
+                    disabled={totalRecords === 0}
                     className="btn btn-secondary"
                     style={{ 
                       padding: '6px 12px', 
                       fontSize: '0.8rem',
+                      fontWeight: 600,
                       backgroundColor: '#fef3c7',
                       borderColor: '#f59e0b',
                       color: '#92400e',
@@ -939,18 +935,19 @@ export default function Dashboard() {
                       alignItems: 'center',
                       gap: '4px'
                     }}
-                    title="Download all records as CSV"
+                    title={selectedBatch === 'ALL' ? "Download complete database records as CSV" : `Download all records for ${selectedBatch} as CSV`}
                   >
                     <Download size={14} />
-                    CSV
+                    {selectedBatch === 'ALL' ? 'CSV (Whole DB)' : 'CSV'}
                   </button>
                   <button
                     onClick={() => handleDownloadRecords('text')}
-                    disabled={totalRecords === 0 || recordsLoading}
+                    disabled={totalRecords === 0}
                     className="btn btn-secondary"
                     style={{ 
                       padding: '6px 12px', 
                       fontSize: '0.8rem',
+                      fontWeight: 600,
                       backgroundColor: '#dbeafe',
                       borderColor: '#3b82f6',
                       color: '#1e40af',
@@ -958,10 +955,10 @@ export default function Dashboard() {
                       alignItems: 'center',
                       gap: '4px'
                     }}
-                    title="Download all records as pipe-delimited text"
+                    title={selectedBatch === 'ALL' ? "Download complete database records as pipe-delimited text" : `Download all records for ${selectedBatch} as Text`}
                   >
                     <Download size={14} />
-                    Text
+                    {selectedBatch === 'ALL' ? 'Text (Whole DB)' : 'Text'}
                   </button>
                 </div>
 

@@ -231,6 +231,62 @@ def get_paginated_parsed_records(
 
     # If querying all batches or a single batch
     if b_id == "ALL":
+        if db:
+            from sqlalchemy import func
+            total_db_tx = db.query(func.sum(DBBatch.valid_records)).filter(DBBatch.status == "IMPORTED").scalar() or 0
+            if total_db_tx > 0:
+                page_cache_key = f"sql_page:ALL:{page}:{page_size}:{success_flag}:{reason_code}:{status_filter}:{search}"
+                if not force_refresh:
+                    cached_page = app_cache.get_records(page_cache_key)
+                    if cached_page is not None:
+                        return cached_page
+
+                query = db.query(DBTransaction)
+                if success_flag is not None and str(success_flag).strip() != "":
+                    query = query.filter(DBTransaction.success_flag == str(success_flag).strip())
+                if reason_code is not None and str(reason_code).strip() != "":
+                    query = query.filter(DBTransaction.reason_code == str(reason_code).strip())
+                if search and str(search).strip() != "":
+                    s = f"%{str(search).strip()}%"
+                    query = query.filter(
+                        (DBTransaction.beneficiary_aadhaar_number.like(s)) |
+                        (DBTransaction.beneficiary_name.like(s)) |
+                        (DBTransaction.user_credit_reference.like(s)) |
+                        (DBTransaction.destination_bank_account_number.like(s))
+                    )
+
+                if not success_flag and not reason_code and not search:
+                    total = total_db_tx
+                else:
+                    total = query.count()
+
+                page_size = min(max(1, page_size), 1000)
+                offset = (page - 1) * page_size
+                tx_page = query.order_by(DBTransaction.id.desc()).offset(offset).limit(page_size).all()
+
+                paged_records = []
+                for tx in tx_page:
+                    rec = {f_name: getattr(tx, f_name, "") for f_name in CANONICAL_FIELD_NAMES}
+                    rec["id"] = str(tx.id)
+                    rec["status"] = "Committed"
+                    rec["batch_id"] = tx.batch_id
+                    rec["_source_file"] = tx.file_id or ""
+                    paged_records.append(rec)
+
+                total_pages = max(1, (total + page_size - 1) // page_size)
+                result = {
+                    "batch_id": "ALL",
+                    "data_source": "Production Database (all transactions)",
+                    "total": total,
+                    "page": page,
+                    "page_size": page_size,
+                    "total_pages": total_pages,
+                    "columns": CANONICAL_FIELD_NAMES + ["status"],
+                    "records": paged_records,
+                }
+                app_cache.set_records(page_cache_key, result)
+                return result
+
         cached_recs = app_cache.get_records("system_all")
         if cached_recs is not None:
             records = cached_recs

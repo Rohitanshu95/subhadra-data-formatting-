@@ -97,30 +97,30 @@ export const getParsedRecords = async (batchId, params = {}) => {
 
 export const downloadRecordsAsCSV = async (batchId, params = {}) => {
   /**
-   * Download all parsed records (as shown in dashboard) in CSV format
-   * Returns a file download in the browser
-   * 
-   * Optional params:
-   * - success_flag: Filter by success flag
-   * - reason_code: Filter by reason code
-   * - status: Filter by status (COMMITTED, INVALID, etc.)
-   * - search: Full-text search
+   * Download all records in CSV format via native stream download.
+   * When batchId is 'all', downloads ALL data present in the MySQL database.
    */
   try {
-    const response = await api.get(`/batches/${batchId}/download/records/csv`, { 
-      params,
-      responseType: 'blob'
-    });
-    
-    // Trigger download
-    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const queryParams = new URLSearchParams();
+    if (params.success_flag !== undefined && params.success_flag !== '') queryParams.append('success_flag', params.success_flag);
+    if (params.reason_code !== undefined && params.reason_code !== '') queryParams.append('reason_code', params.reason_code);
+    if (params.status !== undefined && params.status !== '' && params.status !== 'ALL') queryParams.append('status', params.status);
+    if (params.search !== undefined && params.search !== '') queryParams.append('search', params.search);
+
+    const queryStr = queryParams.toString() ? `?${queryParams.toString()}` : '';
+    const target = (!batchId || batchId.toLowerCase() === 'all') ? 'all' : batchId;
+    const downloadUrl = `/api/batches/${target}/download/records/csv${queryStr}`;
+
     const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `${batchId}_records.csv`);
+    link.href = downloadUrl;
+    link.setAttribute('download', `${target === 'all' ? 'complete_database' : target}_records.csv`);
     document.body.appendChild(link);
     link.click();
-    link.parentNode.removeChild(link);
-    window.URL.revokeObjectURL(url);
+    setTimeout(() => {
+      if (link.parentNode) {
+        document.body.removeChild(link);
+      }
+    }, 200);
   } catch (error) {
     console.error('Failed to download CSV:', error);
     throw error;
@@ -129,30 +129,30 @@ export const downloadRecordsAsCSV = async (batchId, params = {}) => {
 
 export const downloadRecordsAsText = async (batchId, params = {}) => {
   /**
-   * Download all parsed records (as shown in dashboard) in pipe-delimited text format
-   * Returns a file download in the browser
-   * 
-   * Optional params:
-   * - success_flag: Filter by success flag
-   * - reason_code: Filter by reason code
-   * - status: Filter by status (COMMITTED, INVALID, etc.)
-   * - search: Full-text search
+   * Download all records in pipe-delimited text format via native stream download.
+   * When batchId is 'all', downloads ALL data present in the MySQL database.
    */
   try {
-    const response = await api.get(`/batches/${batchId}/download/records/text`, { 
-      params,
-      responseType: 'blob'
-    });
-    
-    // Trigger download
-    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const queryParams = new URLSearchParams();
+    if (params.success_flag !== undefined && params.success_flag !== '') queryParams.append('success_flag', params.success_flag);
+    if (params.reason_code !== undefined && params.reason_code !== '') queryParams.append('reason_code', params.reason_code);
+    if (params.status !== undefined && params.status !== '' && params.status !== 'ALL') queryParams.append('status', params.status);
+    if (params.search !== undefined && params.search !== '') queryParams.append('search', params.search);
+
+    const queryStr = queryParams.toString() ? `?${queryParams.toString()}` : '';
+    const target = (!batchId || batchId.toLowerCase() === 'all') ? 'all' : batchId;
+    const downloadUrl = `/api/batches/${target}/download/records/text${queryStr}`;
+
     const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `${batchId}_records.txt`);
+    link.href = downloadUrl;
+    link.setAttribute('download', `${target === 'all' ? 'complete_database' : target}_records.txt`);
     document.body.appendChild(link);
     link.click();
-    link.parentNode.removeChild(link);
-    window.URL.revokeObjectURL(url);
+    setTimeout(() => {
+      if (link.parentNode) {
+        document.body.removeChild(link);
+      }
+    }, 200);
   } catch (error) {
     console.error('Failed to download text:', error);
     throw error;

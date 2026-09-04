@@ -8,7 +8,7 @@ from __future__ import annotations
 import os
 from typing import Dict, List, Optional
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -435,44 +435,29 @@ async def download_records_as_csv(
     db: Session = Depends(get_db),
 ):
     """
-    Download all parsed records (committed/shown in dashboard) as CSV format.
-    Includes all 17 APBS schema columns plus Status column.
-    
-    Query Parameters:
-        success_flag: Filter by success flag (e.g., "1", "0")
-        reason_code: Filter by reason code
-        status: Filter by status (COMMITTED, INVALID, etc.)
-        search: Full-text search across Aadhaar, name, account numbers
+    Download parsed records as CSV format with high-speed streaming.
+    When batch_id is 'all', downloads ALL data present in the MySQL database.
     """
     try:
-        from app.services.record_service import get_paginated_parsed_records
-        from app.services.download_service import export_records_as_csv
+        from app.services.download_service import stream_records_as_csv
         
-        # Get all records (using large page size to get everything)
-        records_response = get_paginated_parsed_records(
-            batch_id=batch_id if batch_id.lower() != "all" else "ALL",
-            batch_status=None,
+        filename = f"{'complete_database' if batch_id.lower() == 'all' else batch_id}_records.csv"
+        generator = stream_records_as_csv(
             db=db,
-            page=1,
-            page_size=1000000,  # Large number to get all records
+            batch_id=batch_id,
             success_flag=success_flag,
             reason_code=reason_code,
             status_filter=status,
             search=search,
-            force_refresh=False,
         )
-        
-        columns = records_response.get("columns", [])
-        records = records_response.get("records", [])
-        
-        csv_content = export_records_as_csv(records, columns)
-        
-        print(f"[API] [DOWNLOAD] CSV export: {batch_id} ({len(records)} records)")
-        
-        return PlainTextResponse(
-            content=csv_content,
+        print(f"[API] [DOWNLOAD] Streaming CSV export: {batch_id} (full data stream)")
+        return StreamingResponse(
+            generator,
             media_type="text/csv",
-            headers={"Content-Disposition": f'attachment; filename="{batch_id}_records.csv"'}
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Cache-Control": "no-cache",
+            }
         )
     except Exception as e:
         print(f"[API] [ERROR] Failed to export CSV: {e}")
@@ -489,45 +474,29 @@ async def download_records_as_text(
     db: Session = Depends(get_db),
 ):
     """
-    Download all parsed records (committed/shown in dashboard) as pipe-delimited text format.
-    Includes all 17 APBS schema columns plus Status column.
-    Matches the format displayed in the dashboard.
-    
-    Query Parameters:
-        success_flag: Filter by success flag (e.g., "1", "0")
-        reason_code: Filter by reason code
-        status: Filter by status (COMMITTED, INVALID, etc.)
-        search: Full-text search across Aadhaar, name, account numbers
+    Download parsed records as pipe-delimited text format with high-speed streaming.
+    When batch_id is 'all', downloads ALL data present in the MySQL database.
     """
     try:
-        from app.services.record_service import get_paginated_parsed_records
-        from app.services.download_service import export_records_as_text
+        from app.services.download_service import stream_records_as_text
         
-        # Get all records (using large page size to get everything)
-        records_response = get_paginated_parsed_records(
-            batch_id=batch_id if batch_id.lower() != "all" else "ALL",
-            batch_status=None,
+        filename = f"{'complete_database' if batch_id.lower() == 'all' else batch_id}_records.txt"
+        generator = stream_records_as_text(
             db=db,
-            page=1,
-            page_size=1000000,  # Large number to get all records
+            batch_id=batch_id,
             success_flag=success_flag,
             reason_code=reason_code,
             status_filter=status,
             search=search,
-            force_refresh=False,
         )
-        
-        columns = records_response.get("columns", [])
-        records = records_response.get("records", [])
-        
-        text_content = export_records_as_text(records, columns)
-        
-        print(f"[API] [DOWNLOAD] Text export: {batch_id} ({len(records)} records)")
-        
-        return PlainTextResponse(
-            content=text_content,
+        print(f"[API] [DOWNLOAD] Streaming Text export: {batch_id} (full data stream)")
+        return StreamingResponse(
+            generator,
             media_type="text/plain",
-            headers={"Content-Disposition": f'attachment; filename="{batch_id}_records.txt"'}
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Cache-Control": "no-cache",
+            }
         )
     except Exception as e:
         print(f"[API] [ERROR] Failed to export text: {e}")
