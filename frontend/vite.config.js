@@ -8,9 +8,16 @@ export default defineConfig({
     port: 3000,
     proxy: {
       '/api': {
-        // target: 'http://192.168.19.218:8080',
         target: 'http://localhost:8080',
         changeOrigin: true,
+        configure: (proxy) => {
+          proxy.on('error', (err, req, res) => {
+            if (res && res.writeHead) {
+              res.writeHead(502, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Backend server unavailable on port 8080' }));
+            }
+          });
+        },
       },
     },
   },

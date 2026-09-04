@@ -40,24 +40,32 @@ class ImportProgressTracker:
         self._lock = threading.Lock()
         self._progress: Dict[str, dict] = {}
         self._start_times: Dict[str, float] = {}
+        self._expected_records: Dict[str, int] = {}
 
-    def start(self, batch_id: str, total_files: int):
+    def start(self, batch_id: str, total_files: int, total_expected_records: int = 0):
         with self._lock:
             now = time.time()
             self._start_times[batch_id] = now
+            self._expected_records[batch_id] = total_expected_records
+            total_mb = round((total_expected_records * 177) / (1024 * 1024), 2)
             self._progress[batch_id] = {
                 "batch_id": batch_id,
                 "status": "IMPORTING",
                 "current_file": "Initializing buffer...",
                 "file_idx": 0,
                 "total_files": total_files,
+                "remaining_files": total_files,
                 "percent": 0.0,
                 "total_processed": 0,
                 "total_imported": 0,
                 "total_duplicates": 0,
+                "total_expected_records": total_expected_records,
+                "remaining_records": total_expected_records,
                 "elapsed_seconds": 0.0,
                 "speed_records_sec": 0,
                 "data_pushed_mb": 0.0,
+                "data_remaining_mb": total_mb,
+                "total_expected_mb": total_mb,
                 "eta_seconds": 0,
                 "eta_formatted": "Calculating...",
                 "error": None,
@@ -80,6 +88,15 @@ class ImportProgressTracker:
             speed = int(total_imported / elapsed)
             data_mb = round((total_processed * 177) / (1024 * 1024), 2)
             
+            exp_records = self._expected_records.get(batch_id, 0)
+            if exp_records == 0 and total_files > 0:
+                # Approximate total based on current average per file
+                exp_records = int((total_processed / max(file_idx, 1)) * total_files)
+
+            remaining_records = max(0, exp_records - total_processed)
+            total_mb = round((exp_records * 177) / (1024 * 1024), 2)
+            data_remaining_mb = max(0.0, round(total_mb - data_mb, 2))
+
             # Estimate remaining time based on files left
             remaining_files = max(0, total_files - file_idx)
             avg_per_file = elapsed / max(file_idx, 1)
@@ -95,13 +112,18 @@ class ImportProgressTracker:
                 "current_file": current_file,
                 "file_idx": file_idx,
                 "total_files": total_files,
+                "remaining_files": remaining_files,
                 "percent": pct,
                 "total_processed": total_processed,
                 "total_imported": total_imported,
                 "total_duplicates": total_duplicates,
+                "total_expected_records": exp_records,
+                "remaining_records": remaining_records,
                 "elapsed_seconds": elapsed,
                 "speed_records_sec": speed,
                 "data_pushed_mb": data_mb,
+                "data_remaining_mb": data_remaining_mb,
+                "total_expected_mb": total_mb,
                 "eta_seconds": eta_sec,
                 "eta_formatted": eta_fmt,
                 "error": None,
@@ -113,19 +135,25 @@ class ImportProgressTracker:
             elapsed = max(0.1, round(time.time() - start_t, 1))
             curr = self._progress.get(batch_id, {})
             data_mb = round((total_processed * 177) / (1024 * 1024), 2)
+            tot_files = curr.get("total_files", 1)
             self._progress[batch_id] = {
                 "batch_id": batch_id,
                 "status": "IMPORTED",
                 "current_file": "Completed",
-                "file_idx": curr.get("total_files", 1),
-                "total_files": curr.get("total_files", 1),
+                "file_idx": tot_files,
+                "total_files": tot_files,
+                "remaining_files": 0,
                 "percent": 100.0,
                 "total_processed": total_processed,
                 "total_imported": total_imported,
                 "total_duplicates": total_duplicates,
+                "total_expected_records": total_processed,
+                "remaining_records": 0,
                 "elapsed_seconds": elapsed,
-                "speed_records_sec": int(total_imported / elapsed),
+                "speed_records_sec": int(total_imported / elapsed) if elapsed > 0 else 0,
                 "data_pushed_mb": data_mb,
+                "data_remaining_mb": 0.0,
+                "total_expected_mb": data_mb,
                 "eta_seconds": 0,
                 "eta_formatted": "Done",
                 "error": None,
@@ -140,13 +168,18 @@ class ImportProgressTracker:
                 "current_file": "Failed",
                 "file_idx": curr.get("file_idx", 0),
                 "total_files": curr.get("total_files", 0),
+                "remaining_files": 0,
                 "percent": curr.get("percent", 0.0),
                 "total_processed": curr.get("total_processed", 0),
                 "total_imported": curr.get("total_imported", 0),
                 "total_duplicates": curr.get("total_duplicates", 0),
+                "total_expected_records": curr.get("total_expected_records", 0),
+                "remaining_records": 0,
                 "elapsed_seconds": curr.get("elapsed_seconds", 0.0),
                 "speed_records_sec": 0,
                 "data_pushed_mb": curr.get("data_pushed_mb", 0.0),
+                "data_remaining_mb": 0.0,
+                "total_expected_mb": curr.get("total_expected_mb", 0.0),
                 "eta_seconds": 0,
                 "eta_formatted": "Error",
                 "error": str(error),
@@ -155,6 +188,14 @@ class ImportProgressTracker:
     def get(self, batch_id: str) -> Optional[dict]:
         with self._lock:
             return self._progress.get(batch_id)
+
+    def get_all_active(self) -> Dict[str, dict]:
+        with self._lock:
+            return {
+                bid: data
+                for bid, data in self._progress.items()
+                if data.get("status") == "IMPORTING"
+            }
 
 
 import_progress_tracker = ImportProgressTracker()
@@ -221,7 +262,7 @@ class ImportService:
         finally:
             conn.close()
 
-    def import_batch(self, batch_id: str, db: Session) -> ImportResult:
+    def import_batch(self, batch_id: str, db: Session, expected_records: int = 0) -> ImportResult:
         """
         Import all clean output records for a batch into the SQL database.
         Uses native MySQL LOAD DATA LOCAL INFILE with automatic fallback to chunked insertion.
@@ -250,7 +291,15 @@ class ImportService:
         total_imported = 0
         total_duplicates = 0
 
-        import_progress_tracker.start(batch_id, total_files)
+        if expected_records <= 0:
+            try:
+                db_b = db.query(DBBatch).filter(DBBatch.batch_uuid == batch_id).first()
+                if db_b and db_b.valid_records:
+                    expected_records = db_b.valid_records
+            except Exception:
+                pass
+
+        import_progress_tracker.start(batch_id, total_files, expected_records)
 
         # Process each output file in the batch
         for file_idx, filename in enumerate(output_files, 1):

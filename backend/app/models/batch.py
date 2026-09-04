@@ -65,6 +65,8 @@ class BatchMetadata:
             if self.db_committed_count > 0 or self.db_duplicates_count > 0:
                 return f"Committed — {self.db_committed_count} new / {self.db_duplicates_count} dup"
             return f"Committed — {self.valid_records} new / 0 dup"
+        if self.status == BatchStatus.IMPORTING:
+            return "Importing to Database"
         if self.status == BatchStatus.VERIFIED:
             return "Verified — Ready to Commit"
         if self.status == BatchStatus.FAILED:

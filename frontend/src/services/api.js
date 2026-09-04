@@ -85,6 +85,11 @@ export const getImportProgress = async (batchId) => {
   return res.data;
 };
 
+export const getActiveImports = async () => {
+  const res = await api.get('/batches/active-imports');
+  return res.data;
+};
+
 export const getLogs = async (params = {}) => {
   const res = await api.get('/logs', { params });
   return res.data;

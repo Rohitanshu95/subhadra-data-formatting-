@@ -29,7 +29,7 @@ import {
   ChevronsRight,
   Download
 } from 'lucide-react';
-import { listBatches, getOverviewStats, getParsedRecords, deleteBatch, deleteRecord, downloadRecordsAsCSV, downloadRecordsAsText } from '../services/api';
+import { listBatches, getOverviewStats, getParsedRecords, deleteBatch, deleteRecord, downloadRecordsAsCSV, downloadRecordsAsText, getActiveImports } from '../services/api';
 import MetricCard from '../components/MetricCard';
 import StatusBadge from '../components/StatusBadge';
 import Modal from '../components/Modal';
@@ -40,6 +40,8 @@ export default function Dashboard() {
   const [batches, setBatches] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [activeImports, setActiveImports] = useState({});
+  const activeImportsRef = useRef({});
 
   // Records state
   const [records, setRecords] = useState([]);
@@ -81,6 +83,51 @@ export default function Dashboard() {
     }, 250);
     return () => clearTimeout(timer);
   }, [searchQuery]);
+
+  // Polling for active background database imports with adaptive intervals & error backoff
+  useEffect(() => {
+    let isMounted = true;
+    let timerId = null;
+
+    const pollActiveImports = async () => {
+      let nextDelay = 5000; // default idle check interval
+      try {
+        const active = await getActiveImports();
+        if (!isMounted) return;
+
+        const prevKeys = Object.keys(activeImportsRef.current || {});
+        const newKeys = Object.keys(active || {});
+
+        // If an active import completed, automatically refresh dashboard stats & batches
+        if (prevKeys.length > 0 && newKeys.length < prevKeys.length) {
+          fetchOverviewData(true);
+          setToast({ message: 'Database import completed! Pipeline statistics updated.', type: 'success' });
+          setTimeout(() => setToast(null), 4000);
+        }
+
+        activeImportsRef.current = active || {};
+        setActiveImports(active || {});
+
+        // If there are active imports running, poll faster (1.5s) for smooth real-time telemetry
+        if (newKeys.length > 0) {
+          nextDelay = 1500;
+        }
+      } catch (err) {
+        // Backend offline or error: back off to 8s to prevent console spam
+        nextDelay = 8000;
+      } finally {
+        if (isMounted) {
+          timerId = setTimeout(pollActiveImports, nextDelay);
+        }
+      }
+    };
+
+    pollActiveImports();
+    return () => {
+      isMounted = false;
+      if (timerId) clearTimeout(timerId);
+    };
+  }, []);
 
   // Fetch overview stats and batch list (cached per session unless forced)
   const fetchOverviewData = async (forceRefresh = false) => {
@@ -444,6 +491,39 @@ export default function Dashboard() {
 
   const getDbPushBadge = (batch) => {
     const status = batch.status;
+    const activeProg = activeImports[batch.batch_id];
+
+    if (status === 'IMPORTING' || activeProg) {
+      const pct = activeProg ? activeProg.percent : 0;
+      const pushed = activeProg ? activeProg.total_imported : 0;
+      const exp = activeProg ? (activeProg.total_expected_records || batch.valid_records) : batch.valid_records;
+      const eta = activeProg ? activeProg.eta_formatted : 'calculating...';
+      return (
+        <div style={{ minWidth: '150px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', marginBottom: '3px' }}>
+            <span style={{ fontWeight: 700, color: '#1d4ed8' }}>
+              {pct}% Pushed
+            </span>
+            <span style={{ color: '#64748b', fontSize: '0.7rem' }}>
+              ~{eta}
+            </span>
+          </div>
+          <div style={{ width: '100%', height: '6px', background: '#e2e8f0', borderRadius: '3px', overflow: 'hidden' }}>
+            <div style={{
+              width: `${Math.max(3, pct)}%`,
+              height: '100%',
+              background: 'linear-gradient(90deg, #2563eb, #10b981)',
+              borderRadius: '3px',
+              transition: 'width 0.3s ease-out'
+            }} />
+          </div>
+          <div style={{ fontSize: '0.68rem', color: '#475569', marginTop: '3px' }}>
+            {pushed.toLocaleString()} / {exp.toLocaleString()} rec
+          </div>
+        </div>
+      );
+    }
+
     if (status === 'IMPORTED') {
       const newCount = batch.db_committed_count || batch.valid_records || 0;
       const dupCount = batch.db_duplicates_count || 0;
@@ -661,6 +741,85 @@ export default function Dashboard() {
           </Link>
         </div>
       </div>
+
+      {/* Live Active Database Ingestion Banner */}
+      {Object.keys(activeImports).length > 0 && (
+        <div style={{
+          marginBottom: '22px',
+          background: 'linear-gradient(135deg, #eff6ff 0%, #ffffff 100%)',
+          border: '1px solid #bfdbfe',
+          borderLeft: '5px solid #2563eb',
+          borderRadius: '8px',
+          padding: '16px 20px',
+          boxShadow: '0 4px 15px -3px rgba(37, 99, 235, 0.12)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '14px',
+        }}>
+          {Object.entries(activeImports).map(([bId, prog]) => (
+            <div key={bId} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div style={{
+                    width: '34px',
+                    height: '34px',
+                    borderRadius: '8px',
+                    background: '#dbeafe',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    border: '1px solid #93c5fd',
+                  }}>
+                    <Database size={17} color="#1d4ed8" className="animate-pulse" />
+                  </div>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      <span style={{ fontWeight: 700, color: '#0f172a', fontSize: '0.96rem' }}>
+                        Active Database Import in Progress
+                      </span>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.78rem', background: '#e2e8f0', padding: '2px 7px', borderRadius: '4px', color: '#1e293b' }}>
+                        {bId}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '2px' }}>
+                      Pushed: <strong style={{ color: '#1d4ed8' }}>{prog.data_pushed_mb || 0} MB</strong> ({prog.total_imported?.toLocaleString() || 0} rec) • Remaining: <strong style={{ color: '#047857' }}>{prog.data_remaining_mb ?? '0.0'} MB</strong> ({prog.remaining_records?.toLocaleString() ?? 0} rec) • Files: {prog.file_idx}/{prog.total_files}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: '0.92rem', fontWeight: 800, color: '#1d4ed8', fontFamily: 'var(--font-mono)' }}>
+                      {prog.percent}% • ETA: ~{prog.eta_formatted || 'calculating...'}
+                    </div>
+                    <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
+                      {prog.speed_records_sec?.toLocaleString() || 0} rec/sec
+                    </div>
+                  </div>
+                  <Link
+                    to={`/batches/${bId}/results`}
+                    className="btn btn-secondary"
+                    style={{ padding: '5px 12px', fontSize: '0.78rem', borderColor: '#bfdbfe', color: '#1d4ed8', background: '#ffffff', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                  >
+                    View Live Monitor <ArrowRight size={13} />
+                  </Link>
+                </div>
+              </div>
+
+              {/* Progress bar */}
+              <div style={{ width: '100%', height: '8px', background: '#e2e8f0', borderRadius: '4px', overflow: 'hidden' }}>
+                <div style={{
+                  width: `${Math.max(2, prog.percent)}%`,
+                  height: '100%',
+                  background: 'linear-gradient(90deg, #2563eb 0%, #3b82f6 60%, #10b981 100%)',
+                  borderRadius: '4px',
+                  transition: 'width 0.3s ease-out',
+                }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* 5 Pipeline-Stage Summary Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '14px', marginBottom: '24px' }}>
@@ -1481,7 +1640,25 @@ export default function Dashboard() {
                           </span>
                         </td>
                         <td>
-                          <StatusBadge status={batch.status} />
+                          {activeImports[batch.batch_id] ? (
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              padding: '3px 10px',
+                              borderRadius: '12px',
+                              fontSize: '0.75rem',
+                              fontWeight: 700,
+                              background: '#dbeafe',
+                              color: '#1d4ed8',
+                              border: '1px solid #bfdbfe'
+                            }}>
+                              <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#2563eb', display: 'inline-block' }} />
+                              Pushing ({activeImports[batch.batch_id].percent}%)
+                            </span>
+                          ) : (
+                            <StatusBadge status={batch.status} />
+                          )}
                         </td>
                         <td>
                           <strong>{batch.total_files}</strong> file{batch.total_files !== 1 ? 's' : ''}
@@ -1533,14 +1710,25 @@ export default function Dashboard() {
                             >
                               <Terminal size={12} /> Logs
                             </Link>
-                            <Link 
-                              to={`/batches/${batch.batch_id}/results`} 
-                              className="btn btn-primary"
-                              style={{ padding: '4px 8px', fontSize: '0.75rem' }}
-                              title="Verification & downloads"
-                            >
-                              Results <ArrowRight size={11} />
-                            </Link>
+                            {activeImports[batch.batch_id] ? (
+                              <Link 
+                                to={`/batches/${batch.batch_id}/results`} 
+                                className="btn btn-primary"
+                                style={{ padding: '4px 8px', fontSize: '0.75rem', background: '#2563eb', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
+                                title="View live database ingestion progress"
+                              >
+                                Live Monitor <ArrowRight size={11} />
+                              </Link>
+                            ) : (
+                              <Link 
+                                to={`/batches/${batch.batch_id}/results`} 
+                                className="btn btn-primary"
+                                style={{ padding: '4px 8px', fontSize: '0.75rem' }}
+                                title="Verification & downloads"
+                              >
+                                Results <ArrowRight size={11} />
+                              </Link>
+                            )}
                             <button
                               onClick={() => promptDeleteBatch(batch.batch_id)}
                               disabled={deletingId === batch.batch_id}

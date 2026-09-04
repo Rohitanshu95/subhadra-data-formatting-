@@ -99,6 +99,15 @@ async def list_batches(refresh: bool = False):
     return batches
 
 
+@router.get("/active-imports")
+async def get_active_imports():
+    """
+    Get real-time live progress for all batches currently pushing data into SQL database.
+    """
+    from app.services.import_service import import_progress_tracker
+    return import_progress_tracker.get_all_active()
+
+
 @router.get("/overview/stats")
 async def get_overview_stats(refresh: bool = False, db: Session = Depends(get_db)):
     """
@@ -515,7 +524,7 @@ def run_import_background(batch_id: str):
         batch.status = BatchStatus.IMPORTING
         default_batch_manager._sync_batch_to_db(batch)
         importer = ImportService()
-        result = importer.import_batch(batch_id, db)
+        result = importer.import_batch(batch_id, db, batch.valid_records)
         batch.status = BatchStatus.IMPORTED
         default_batch_manager._sync_batch_to_db(batch)
         app_cache.invalidate_all()
@@ -547,7 +556,7 @@ def commit_batch_to_sql(batch_id: str, background_tasks: BackgroundTasks, db: Se
             )
 
         from app.services.import_service import import_progress_tracker
-        import_progress_tracker.start(batch_id, len(batch.files))
+        import_progress_tracker.start(batch_id, len(batch.files), batch.valid_records)
         batch.status = BatchStatus.IMPORTING
         default_batch_manager._sync_batch_to_db(batch)
 
@@ -558,6 +567,7 @@ def commit_batch_to_sql(batch_id: str, background_tasks: BackgroundTasks, db: Se
             "status": "IMPORTING",
             "message": "Database import running in background",
             "total_files": len(batch.files),
+            "total_expected_records": batch.valid_records,
         }
     except BatchNotFoundError:
         raise HTTPException(status_code=404, detail=f"Batch '{batch_id}' not found")
@@ -574,15 +584,24 @@ def get_batch_import_progress(batch_id: str):
         try:
             batch = default_batch_manager.get_batch(batch_id)
             is_imp = batch.status in (BatchStatus.IMPORTED, "IMPORTED")
+            tot_mb = round((batch.valid_records * 177) / (1024 * 1024), 2)
             return {
                 "batch_id": batch_id,
                 "status": "IMPORTED" if is_imp else (batch.status.value if hasattr(batch.status, "value") else str(batch.status)),
                 "percent": 100.0 if is_imp else 0.0,
                 "file_idx": len(batch.files) if is_imp else 0,
                 "total_files": len(batch.files),
+                "remaining_files": 0 if is_imp else len(batch.files),
                 "current_file": "Completed" if is_imp else "Pending",
                 "total_imported": batch.valid_records if is_imp else 0,
-                "total_duplicates": getattr(batch, "duplicate_records", 0),
+                "total_duplicates": getattr(batch, "db_duplicates_count", 0),
+                "total_expected_records": batch.valid_records,
+                "remaining_records": 0 if is_imp else batch.valid_records,
+                "data_pushed_mb": tot_mb if is_imp else 0.0,
+                "data_remaining_mb": 0.0 if is_imp else tot_mb,
+                "total_expected_mb": tot_mb,
+                "speed_records_sec": 0,
+                "eta_formatted": "Done" if is_imp else "0s",
                 "error": None,
             }
         except BatchNotFoundError:

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { 
   ShieldCheck, 
@@ -39,6 +39,41 @@ export default function BatchResults() {
   const [actionLoading, setActionLoading] = useState(false);
   const [importResult, setImportResult] = useState(null);
   const [importProgress, setImportProgress] = useState(null);
+  const pollingIntervalRef = useRef(null);
+
+  const startImportPolling = (bId = batchId) => {
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+    }
+    pollingIntervalRef.current = setInterval(async () => {
+      try {
+        const prog = await getImportProgress(bId);
+        if (prog) {
+          setImportProgress(prog);
+          if (prog.status === 'IMPORTED' || prog.percent >= 100) {
+            clearInterval(pollingIntervalRef.current);
+            pollingIntervalRef.current = null;
+            setActionLoading(false);
+            const updated = await getBatch(bId);
+            setBatch(updated);
+            setImportResult({
+              total_imported: prog.total_imported,
+              total_duplicates: prog.total_duplicates,
+              total_processed: prog.total_processed,
+            });
+            showToast(`Successfully committed ${prog.total_imported?.toLocaleString()} records to SQL database!`);
+          } else if (prog.status === 'FAILED') {
+            clearInterval(pollingIntervalRef.current);
+            pollingIntervalRef.current = null;
+            setActionLoading(false);
+            showToast(`Import failed: ${prog.error || 'Unknown error'}`, 'error');
+          }
+        }
+      } catch (pErr) {
+        console.error('Progress poll error', pErr);
+      }
+    }, 800);
+  };
 
   const fetchAllData = async () => {
     try {
@@ -53,6 +88,9 @@ export default function BatchResults() {
       setCleanRecords(cleanData);
       setErrorRecords(errorsData);
       setSummaryText(summaryData);
+      if (batchData?.status === 'IMPORTING') {
+        startImportPolling(batchId);
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -62,6 +100,12 @@ export default function BatchResults() {
 
   useEffect(() => {
     fetchAllData();
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
+      }
+    };
   }, [batchId]);
 
   const [modalConfig, setModalConfig] = useState({
@@ -115,43 +159,26 @@ export default function BatchResults() {
           setActionLoading(true);
           closeModal();
           const res = await importBatchToSql(batchId);
+          const totalFiles = res.total_files || (batch?.files ? Object.keys(batch.files).length : 1);
+          const expectedRecs = batch?.valid_records || 0;
+          const expectedMb = Number(((expectedRecs * 177) / (1024 * 1024)).toFixed(2));
           setImportProgress({
             percent: 0,
             file_idx: 0,
-            total_files: res.total_files || (batch?.files ? Object.keys(batch.files).length : 1),
+            total_files: totalFiles,
+            remaining_files: totalFiles,
             total_imported: 0,
             total_duplicates: 0,
+            total_expected_records: expectedRecs,
+            remaining_records: expectedRecs,
+            data_pushed_mb: 0.0,
+            data_remaining_mb: expectedMb,
+            total_expected_mb: expectedMb,
             current_file: 'Starting bulk import...',
             status: 'IMPORTING'
           });
 
-          // Start active polling of import progress
-          const interval = setInterval(async () => {
-            try {
-              const prog = await getImportProgress(batchId);
-              if (prog) {
-                setImportProgress(prog);
-                if (prog.status === 'IMPORTED' || prog.percent >= 100) {
-                  clearInterval(interval);
-                  setActionLoading(false);
-                  const updated = await getBatch(batchId);
-                  setBatch(updated);
-                  setImportResult({
-                    total_imported: prog.total_imported,
-                    total_duplicates: prog.total_duplicates,
-                    total_processed: prog.total_processed,
-                  });
-                  showToast(`Successfully committed ${prog.total_imported?.toLocaleString()} records to SQL database!`);
-                } else if (prog.status === 'FAILED') {
-                  clearInterval(interval);
-                  setActionLoading(false);
-                  showToast(`Import failed: ${prog.error || 'Unknown error'}`, 'error');
-                }
-              }
-            } catch (pErr) {
-              console.error('Progress poll error', pErr);
-            }
-          }, 800);
+          startImportPolling(batchId);
         } catch (err) {
           showToast(err.response?.data?.detail || 'Failed to start database import', 'error');
           setActionLoading(false);
@@ -341,10 +368,10 @@ export default function BatchResults() {
               </div>
             </div>
 
-            {/* Slightly Highlighted Ingestion Telemetry Cards */}
+            {/* Ingestion Telemetry Cards with Pushed vs Remaining details */}
             <div style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
               gap: '12px',
               marginBottom: '18px',
             }}>
@@ -356,12 +383,29 @@ export default function BatchResults() {
                 padding: '12px 14px',
                 boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
               }}>
-                <div style={{ fontSize: '0.72rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.03em' }}>Data Pushed</div>
+                <div style={{ fontSize: '0.72rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.03em' }}>Data Volume</div>
                 <div style={{ fontSize: '1.28rem', fontWeight: 800, color: '#1d4ed8', marginTop: '3px', fontFamily: 'var(--font-mono)' }}>
                   {importProgress.data_pushed_mb || 0} <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 600 }}>MB</span>
                 </div>
-                <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '2px' }}>
-                  {importProgress.total_imported?.toLocaleString()} records
+                <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '3px' }}>
+                  <span style={{ color: '#047857', fontWeight: 600 }}>Remaining:</span> {importProgress.data_remaining_mb ?? '0.0'} MB
+                </div>
+              </div>
+
+              <div style={{
+                background: '#ffffff',
+                border: '1px solid #e2e8f0',
+                borderTop: '3px solid #059669',
+                borderRadius: '8px',
+                padding: '12px 14px',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+              }}>
+                <div style={{ fontSize: '0.72rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.03em' }}>Records Pushed</div>
+                <div style={{ fontSize: '1.28rem', fontWeight: 800, color: '#047857', marginTop: '3px', fontFamily: 'var(--font-mono)' }}>
+                  {importProgress.total_imported?.toLocaleString() || 0}
+                </div>
+                <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '3px' }}>
+                  <span style={{ color: '#b45309', fontWeight: 600 }}>Remaining:</span> {importProgress.remaining_records?.toLocaleString() ?? 0}
                 </div>
               </div>
 
@@ -377,24 +421,9 @@ export default function BatchResults() {
                 <div style={{ fontSize: '1.28rem', fontWeight: 800, color: '#0f172a', marginTop: '3px', fontFamily: 'var(--font-mono)' }}>
                   {importProgress.file_idx} <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 600 }}>/ {importProgress.total_files}</span>
                 </div>
-                <div style={{ fontSize: '0.75rem', color: '#16a34a', marginTop: '2px', fontWeight: 600 }}>
-                  {Math.max(0, (importProgress.total_files || 0) - (importProgress.file_idx || 0))} remaining
+                <div style={{ fontSize: '0.75rem', color: '#16a34a', marginTop: '3px', fontWeight: 600 }}>
+                  {importProgress.remaining_files ?? Math.max(0, (importProgress.total_files || 0) - (importProgress.file_idx || 0))} remaining
                 </div>
-              </div>
-
-              <div style={{
-                background: '#ffffff',
-                border: '1px solid #e2e8f0',
-                borderTop: '3px solid #16a34a',
-                borderRadius: '8px',
-                padding: '12px 14px',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-              }}>
-                <div style={{ fontSize: '0.72rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.03em' }}>Throughput</div>
-                <div style={{ fontSize: '1.28rem', fontWeight: 800, color: '#15803d', marginTop: '3px', fontFamily: 'var(--font-mono)' }}>
-                  {importProgress.speed_records_sec?.toLocaleString() || 0}
-                </div>
-                <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '2px' }}>records / sec</div>
               </div>
 
               <div style={{
@@ -405,12 +434,12 @@ export default function BatchResults() {
                 padding: '12px 14px',
                 boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
               }}>
-                <div style={{ fontSize: '0.72rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.03em' }}>Estimated Time</div>
+                <div style={{ fontSize: '0.72rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.03em' }}>Throughput & ETA</div>
                 <div style={{ fontSize: '1.28rem', fontWeight: 800, color: '#b45309', marginTop: '3px', fontFamily: 'var(--font-mono)' }}>
                   ~{importProgress.eta_formatted || '0s'}
                 </div>
-                <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '2px' }}>
-                  Elapsed: {importProgress.elapsed_seconds || 0}s
+                <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '3px' }}>
+                  {importProgress.speed_records_sec?.toLocaleString() || 0} rec/s ({importProgress.elapsed_seconds || 0}s)
                 </div>
               </div>
             </div>
